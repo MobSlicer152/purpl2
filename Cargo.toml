@@ -1,5 +1,5 @@
 [package]
-name = "purpl-engine-2"
+name = "purpl-rs"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,10 +8,13 @@ name = "purpl"
 path = "src/main.rs"
 test = false
 
+[build-dependencies]
+embed-resource = "2.1.1"
+
 [dependencies]
 chrono = "0.4.24"
+const_format = "0.2.30"
 directories = "5.0.0"
-embed-resource = "2.1.1"
 enum-iterator = "1.4.0"
 fern = "0.6.2"
 log = "0.4"

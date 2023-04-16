@@ -106,7 +106,14 @@ unsafe fn init_wnd() {
     WND_WIDTH = (client_area.right - client_area.left) as u32;
     WND_HEIGHT = (client_area.bottom - client_area.top) as u32;
 
-    WND_TITLE = std::format!("{} v{}", crate::GAME_NAME, crate::GAME_VERSION_STRING);
+    WND_TITLE = std::format!(
+        "{} v{}.{}.{} by {}",
+        crate::GAME_NAME,
+        crate::GAME_VERSION_MAJOR,
+        crate::GAME_VERSION_MINOR,
+        crate::GAME_VERSION_PATCH,
+        crate::GAME_ORGANIZATION_NAME
+    );
     debug!(
         "Creating {}x{} window titled {}",
         WND_WIDTH, WND_HEIGHT, WND_TITLE
@@ -175,13 +182,11 @@ pub unsafe fn update() -> bool {
     !WND_CLOSED
 }
 
-pub fn shutdown() {
+pub unsafe fn shutdown() {
     info!("Windows video shutdown started");
 
     debug!("Destroying window");
-    unsafe {
-        winuser::DestroyWindow(WND);
-    }
+    winuser::DestroyWindow(WND);
 
     info!("Windows video shutdown succeeded");
 }
