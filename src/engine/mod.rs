@@ -1,6 +1,7 @@
 use crate::platform;
 use chrono::Local;
 use enum_iterator::Sequence;
+use fern::colors::{Color, ColoredLevelConfig};
 use log::info;
 use std::fs;
 use std::io;
@@ -17,11 +18,19 @@ pub enum DataDir {
 fn setup_logger() -> Result<(), fern::InitError> {
     let dt = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
+    let colors_line = ColoredLevelConfig::new()
+        .error(Color::Red)
+        .warn(Color::Yellow)
+        .info(Color::Green)
+        .debug(Color::BrightCyan)
+        .trace(Color::Cyan);
+
     fern::Dispatch::new()
-        .format(|out, message, record| {
+        .format(move |out, message, record| {
             let dt = Local::now();
             out.finish(format_args!(
-                "[{} {} {}] {}",
+                "\x1B[{}m[{} {} {}] {}\x1B[0m",
+                colors_line.get_color(&record.level()).to_fg_str(),
                 dt.format("%Y-%m-%d %H:%M:%S"),
                 record.level(),
                 record.target(),

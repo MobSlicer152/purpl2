@@ -10,8 +10,6 @@ Use Cargo.
 
 You need Rust or something, I don't know this is the first thing I've written in Rust.
 
-The build scripts are terrible but work fairly well for the default stuff.
-
 ### Interesting stuff I guess
 
 This is a Rust rewrite of [my C engine](https://github.com/MobSlicer152/purpl-engine).
