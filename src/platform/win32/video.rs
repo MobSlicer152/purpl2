@@ -190,3 +190,18 @@ pub unsafe fn shutdown() {
 
     info!("Windows video shutdown succeeded");
 }
+
+pub unsafe fn get_size(mut width: &u32, mut height: &u32) {
+    width = &WND_WIDTH;
+    height = &WND_HEIGHT;
+}
+
+pub unsafe fn resized() -> bool {
+    let ret = WND_RESIZED;
+    WND_RESIZED = false;
+    ret
+}
+
+pub unsafe fn focused() -> bool {
+    WND_FOCUSED
+}

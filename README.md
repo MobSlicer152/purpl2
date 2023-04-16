@@ -34,6 +34,10 @@ I suck at optimization, but I'm also trying to avoid worrying about it until it'
 
 I heard that Doom Eternal uses thread jobs for everything so I hope to figure out how to do something like that.
 
+### Things that need to be changed eventually
+
+- Make video backends more idiomatic by using nested functions or whatever the Rust way is
+
 ### Dependencies
 
 See [Cargo.toml](Cargo.toml)

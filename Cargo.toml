@@ -20,7 +20,7 @@ fern = "0.6.2"
 log = "0.4"
 vulkano = { version = "0.33.0", optional = true }
 
-[dependencies.winapi]
+[target.'cfg(windows)'.dependencies.winapi]
 version = "0.3.9"
 features = [
     "errhandlingapi",
@@ -30,6 +30,9 @@ features = [
     "winbase",
     "winuser"
 ]
+
+[target.'cfg(unix)'.dependencies]
+xcb = "1.2.0"
 
 [features]
 default = ["vulkan"]
