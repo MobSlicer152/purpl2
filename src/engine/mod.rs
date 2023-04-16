@@ -1,8 +1,11 @@
-use crate::{platform, GAME_EXECUTABLE_NAME};
+use crate::platform;
 use chrono::Local;
 use enum_iterator::Sequence;
 use log::info;
-use std::string::String;
+use std::fs;
+use std::io;
+
+mod rendersystem;
 
 #[derive(Debug, PartialEq, Sequence)]
 pub enum DataDir {
@@ -26,9 +29,9 @@ fn setup_logger() -> Result<(), fern::InitError> {
             ))
         })
         .level(log::LevelFilter::Debug)
-        .chain(std::io::stdout())
+        .chain(io::stdout())
         .chain(fern::log_file(
-            get_data_dir(DataDir::Logs) + GAME_EXECUTABLE_NAME + "-" + &dt + ".log",
+            get_data_dir(DataDir::Logs) + crate::GAME_EXECUTABLE_NAME + "-" + &dt + ".log",
         )?)
         .apply()?;
     Ok(())
@@ -36,7 +39,7 @@ fn setup_logger() -> Result<(), fern::InitError> {
 
 pub fn init() {
     for dir in enum_iterator::all::<DataDir>() {
-        if std::fs::create_dir_all(get_data_dir(dir)).is_err() {
+        if fs::create_dir_all(get_data_dir(dir)).is_err() {
             panic!(
                 "Failed to create engine data directory {}",
                 get_data_dir(DataDir::Root)
@@ -51,11 +54,19 @@ pub fn init() {
     info!("Engine initialization started");
 
     platform::video::init();
+    rendersystem::init();
+}
+
+pub fn update() {
+    rendersystem::begin_cmds();
+
+    rendersystem::present();
 }
 
 pub fn shutdown() {
     info!("Engine shutdown started");
 
+    rendersystem::shutdown();
     platform::video::shutdown();
 
     info!("Engine shutdown succeeded");

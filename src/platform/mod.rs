@@ -5,7 +5,7 @@ mod win32;
 
 mod platform_impl {
     #[cfg(windows)]
-    pub use super::win32::*;
+    pub use crate::platform::win32::*;
 }
 
 pub fn init() {

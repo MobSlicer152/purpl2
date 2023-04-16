@@ -1,4 +1,6 @@
 use log::{debug, info};
+use std::mem;
+use std::ptr;
 use winapi::shared::windef;
 use winapi::um::errhandlingapi;
 use winapi::um::libloaderapi;
@@ -6,7 +8,7 @@ use winapi::um::winuser;
 
 const IDI_ICON1: u32 = 103;
 
-static mut WND: windef::HWND = std::ptr::null_mut();
+static mut WND: windef::HWND = ptr::null_mut();
 
 const WND_CLASS_NAME: &str = "PurplWindow";
 
@@ -24,16 +26,14 @@ unsafe extern "system" fn wndproc(
     wparam: usize,
     lparam: isize,
 ) -> isize {
-    if WND == std::ptr::null_mut() || msgwnd == WND {
+    if WND == ptr::null_mut() || msgwnd == WND {
         match msg {
             winuser::WM_SIZE => {
-                let mut client_area: windef::RECT = std::mem::zeroed();
-                let mut new_width: u32 = 0;
-                let mut new_height: u32 = 0;
+                let mut client_area: windef::RECT = mem::zeroed();
 
-                winuser::GetClientRect(msgwnd, std::ptr::addr_of_mut!(client_area));
-                new_width = (client_area.right - client_area.left) as u32;
-                new_height = (client_area.bottom - client_area.top) as u32;
+                winuser::GetClientRect(msgwnd, ptr::addr_of_mut!(client_area));
+                let new_width = (client_area.right - client_area.left) as u32;
+                let new_height = (client_area.bottom - client_area.top) as u32;
 
                 if new_width != WND_WIDTH || new_height != WND_HEIGHT {
                     WND_RESIZED = true;
@@ -68,18 +68,18 @@ unsafe extern "system" fn wndproc(
 }
 
 unsafe fn register_wndclass() {
-    let mut wnd_class: winuser::WNDCLASSEXA = std::mem::zeroed();
-    let base_addr = libloaderapi::GetModuleHandleA(std::ptr::null_mut());
+    let mut wnd_class: winuser::WNDCLASSEXA = mem::zeroed();
+    let base_addr = libloaderapi::GetModuleHandleA(ptr::null_mut());
 
     debug!("Registering window class");
 
-    wnd_class.cbSize = std::mem::size_of::<winuser::WNDCLASSEXA>() as u32;
+    wnd_class.cbSize = mem::size_of::<winuser::WNDCLASSEXA>() as u32;
     wnd_class.lpfnWndProc = Some(wndproc);
     wnd_class.hInstance = base_addr;
-    wnd_class.hCursor = winuser::LoadCursorA(std::ptr::null_mut(), winuser::IDC_ARROW as *const i8);
+    wnd_class.hCursor = winuser::LoadCursorA(ptr::null_mut(), winuser::IDC_ARROW as *const i8);
     wnd_class.hIcon = winuser::LoadIconA(base_addr, IDI_ICON1 as *const i8);
     wnd_class.lpszClassName = WND_CLASS_NAME.as_ptr() as *const i8;
-    if winuser::RegisterClassExA(std::ptr::addr_of_mut!(wnd_class)) == 0 {
+    if winuser::RegisterClassExA(ptr::addr_of_mut!(wnd_class)) == 0 {
         let err = errhandlingapi::GetLastError();
         panic!(
             "Failed to register window class: error 0x{:X} ({})",
@@ -91,15 +91,15 @@ unsafe fn register_wndclass() {
 }
 
 unsafe fn init_wnd() {
-    let mut client_area: windef::RECT = std::mem::zeroed();
-    let base_addr = libloaderapi::GetModuleHandleA(std::ptr::null_mut());
+    let mut client_area: windef::RECT = mem::zeroed();
+    let base_addr = libloaderapi::GetModuleHandleA(ptr::null_mut());
 
     client_area.left = 0;
     client_area.right = (winuser::GetSystemMetrics(winuser::SM_CXSCREEN) as f32 / 1.5) as i32;
     client_area.top = 0;
     client_area.bottom = (winuser::GetSystemMetrics(winuser::SM_CYSCREEN) as f32 / 1.5) as i32;
     winuser::AdjustWindowRect(
-        std::ptr::addr_of_mut!(client_area),
+        ptr::addr_of_mut!(client_area),
         winuser::WS_OVERLAPPEDWINDOW,
         false as i32,
     );
@@ -128,17 +128,17 @@ unsafe fn init_wnd() {
         winuser::CW_USEDEFAULT,
         WND_WIDTH as i32,
         WND_HEIGHT as i32,
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
+        ptr::null_mut(),
+        ptr::null_mut(),
         base_addr,
-        std::ptr::null_mut(),
+        ptr::null_mut(),
     );
-    if WND == std::ptr::null_mut() {
+    if WND == ptr::null_mut() {
         let err = errhandlingapi::GetLastError();
         panic!("Failed to create window: error 0x{:X} {}", err, err);
     }
 
-    winuser::GetClientRect(WND, std::ptr::addr_of_mut!(client_area));
+    winuser::GetClientRect(WND, ptr::addr_of_mut!(client_area));
     WND_WIDTH = (client_area.right - client_area.left) as u32;
     WND_HEIGHT = (client_area.bottom - client_area.top) as u32;
 
@@ -165,18 +165,18 @@ pub unsafe fn init() {
 }
 
 pub unsafe fn update() -> bool {
-    let mut msg: winuser::MSG = std::mem::zeroed();
+    let mut msg: winuser::MSG = mem::zeroed();
 
     while winuser::PeekMessageA(
-        std::ptr::addr_of_mut!(msg),
-        std::ptr::null_mut(),
+        ptr::addr_of_mut!(msg),
+        ptr::null_mut(),
         0,
         0,
         winuser::PM_REMOVE,
     ) != 0
     {
-        winuser::TranslateMessage(std::ptr::addr_of_mut!(msg));
-        winuser::DispatchMessageA(std::ptr::addr_of_mut!(msg));
+        winuser::TranslateMessage(ptr::addr_of_mut!(msg));
+        winuser::DispatchMessageA(ptr::addr_of_mut!(msg));
     }
 
     !WND_CLOSED
