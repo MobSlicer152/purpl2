@@ -5,9 +5,11 @@ pub fn init() {
     debug!("Vulkan initialization succeeded");
 }
 
-pub fn begin_cmds() {}
+pub fn begin_cmds() {
+}
 
-pub fn present() {}
+pub fn present() {
+}
 
 pub fn shutdown() {
     debug!("Vulkan shutdown started");

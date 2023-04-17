@@ -25,6 +25,8 @@ pub struct Model {
     name: String,
     //mesh: Mesh,
     material: Material,
+    //#[cfg(feature = "vulkan")]
+    //handle: VulkanModel
 }
 
 pub trait Renderable {
