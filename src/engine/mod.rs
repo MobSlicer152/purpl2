@@ -1,19 +1,11 @@
 use crate::platform;
 use chrono::Local;
-use enum_iterator::Sequence;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::info;
 use std::fs;
 use std::io;
 
 mod rendersystem;
-
-#[derive(Debug, PartialEq, Sequence)]
-pub enum DataDir {
-    Root,
-    Logs,
-    Saves,
-}
 
 fn setup_logger() -> Result<(), fern::InitError> {
     let dt = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
@@ -40,19 +32,16 @@ fn setup_logger() -> Result<(), fern::InitError> {
         .level(log::LevelFilter::Debug)
         .chain(io::stdout())
         .chain(fern::log_file(
-            get_data_dir(DataDir::Logs) + crate::GAME_EXECUTABLE_NAME + "-" + &dt + ".log",
+            DataDirs::logs() + crate::GAME_EXECUTABLE_NAME + "-" + &dt + ".log",
         )?)
         .apply()?;
     Ok(())
 }
 
 pub fn init() {
-    for dir in enum_iterator::all::<DataDir>() {
-        if fs::create_dir_all(get_data_dir(dir)).is_err() {
-            panic!(
-                "Failed to create engine data directory {}",
-                get_data_dir(DataDir::Root)
-            )
+    for dir in DataDirs::all() {
+        if fs::create_dir_all(dir.clone()).is_err() {
+            panic!("Failed to create engine data directory {dir}")
         }
     }
 
@@ -81,19 +70,24 @@ pub fn shutdown() {
     info!("Engine shutdown succeeded");
 }
 
-pub fn get_data_dir(subdir: DataDir) -> String {
-    let basedirs = directories::BaseDirs::new().unwrap();
-    let subdir_path = basedirs.data_dir();
+use crate::GAME_NAME;
+pub struct DataDirs;
+impl DataDirs {
+    pub fn all() -> Vec<String> {
+        vec![Self::base_path(), Self::logs(), Self::saves()]
+    }
 
-    let path = String::from(subdir_path.to_str().unwrap())
-        + "/"
-        + crate::GAME_NAME
-        + "/"
-        + match subdir {
-            DataDir::Root => "",
-            DataDir::Logs => "logs/",
-            DataDir::Saves => "saves/",
-        };
+    fn base_path() -> String {
+        let basedirs = directories::BaseDirs::new().unwrap();
+        let subdir_path = basedirs.data_dir().to_str().unwrap().replace("\\", "/");
+        format!("{subdir_path}/{GAME_NAME}/")
+    }
 
-    path.replace("\\", "/")
+    pub fn logs() -> String {
+        Self::base_path() + "logs/"
+    }
+
+    pub fn saves() -> String {
+        Self::base_path() + "saves/"
+    }
 }
