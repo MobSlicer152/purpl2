@@ -15,7 +15,6 @@ embed-resource = "2.1.1"
 chrono = "0.4.24"
 const_format = "0.2.30"
 directories = "5.0.0"
-enum-iterator = "1.4.0"
 fern = { version = "0.6.2", features = ["colored"] }
 log = "0.4"
 mimalloc = "0.1.36"

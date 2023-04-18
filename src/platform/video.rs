@@ -1,8 +1,8 @@
 mod video_impl {
-    #[cfg(windows)]
-    pub use crate::platform::win32::video::*;
     #[cfg(unix)]
     pub use crate::platform::unix::video::*;
+    #[cfg(windows)]
+    pub use crate::platform::win32::video::*;
 }
 
 pub fn init() {
@@ -17,8 +17,8 @@ pub fn shutdown() {
     unsafe { video_impl::shutdown() }
 }
 
-pub fn get_size(width: &u32, height: &u32) {
-    unsafe { video_impl::get_size(width, height) }
+pub fn set_size(width: &u32, height: &u32) {
+    unsafe { video_impl::set_size(width, height) }
 }
 
 pub fn resized() -> bool {

@@ -8,7 +8,7 @@ Use Cargo.
 
 ### Build requirements
 
-You need Rust or something, I don't know this is the first thing I've written in Rust.
+Install Rust and its dependancies. [official installation](https://www.rust-lang.org/tools/install)
 
 ### Interesting stuff I guess
 
