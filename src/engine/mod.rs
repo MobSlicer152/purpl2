@@ -1,11 +1,10 @@
+mod rendersystem;
+
 use crate::platform;
 use chrono::Local;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::info;
-use std::fs;
-use std::io;
-
-mod rendersystem;
+use std::{fs, io};
 
 fn setup_logger() -> Result<(), fern::InitError> {
     let dt = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
@@ -74,20 +73,20 @@ use crate::GAME_NAME;
 pub struct DataDirs;
 impl DataDirs {
     pub fn all() -> Vec<String> {
-        vec![Self::base_path(), Self::logs(), Self::saves()]
+        vec![Self::base(), Self::logs(), Self::saves()]
     }
 
-    fn base_path() -> String {
+    pub fn base() -> String {
         let basedirs = directories::BaseDirs::new().unwrap();
         let subdir_path = basedirs.data_dir().to_str().unwrap().replace("\\", "/");
         format!("{subdir_path}/{GAME_NAME}/")
     }
 
     pub fn logs() -> String {
-        Self::base_path() + "logs/"
+        Self::base() + "logs/"
     }
 
     pub fn saves() -> String {
-        Self::base_path() + "saves/"
+        Self::base() + "saves/"
     }
 }

@@ -1,7 +1,5 @@
 use log::{debug, info};
 use std::mem;
-use std::ptr;
-use xcb;
 use xcb::x;
 
 static mut XCB_CONNECTION: Option<xcb::Connection> = None;
@@ -20,7 +18,7 @@ unsafe fn get_xcb_atom(name: &str) -> x::Atom {
     let conn = XCB_CONNECTION.as_ref().unwrap();
     let reply = conn.send_request(&x::InternAtom {
         only_if_exists: true,
-        name: name.as_bytes()
+        name: name.as_bytes(),
     });
     conn.wait_for_reply(reply).unwrap().atom()
 }
@@ -55,8 +53,8 @@ pub unsafe fn init() {
         visual: screen.root_visual(),
         value_list: &[
             x::Cw::BackPixel(screen.black_pixel()),
-            x::Cw::EventMask(x::EventMask::FOCUS_CHANGE | x::EventMask::STRUCTURE_NOTIFY)
-        ]
+            x::Cw::EventMask(x::EventMask::FOCUS_CHANGE | x::EventMask::STRUCTURE_NOTIFY),
+        ],
     });
     if conn.check_request(cookie).is_err() {
         panic!("Failed to create window");
@@ -67,7 +65,7 @@ pub unsafe fn init() {
         window: *wnd,
         property: x::ATOM_WM_NAME,
         r#type: x::ATOM_STRING,
-        data: WND_TITLE.as_bytes()
+        data: WND_TITLE.as_bytes(),
     });
     if conn.check_request(cookie).is_err() {
         panic!("Failed to set window title to {}", WND_TITLE);
@@ -79,12 +77,10 @@ pub unsafe fn init() {
         window: *wnd,
         property: protocols,
         r#type: x::ATOM_ATOM,
-        data: &[get_xcb_atom("WM_DELETE_WINDOW")]
+        data: &[get_xcb_atom("WM_DELETE_WINDOW")],
     });
 
-    conn.send_request(&x::MapWindow {
-        window: *wnd
-    });
+    conn.send_request(&x::MapWindow { window: *wnd });
 
     if conn.flush().is_err() {
         panic!("Failed to flush XCB connection");
@@ -95,38 +91,39 @@ pub unsafe fn init() {
 
 pub unsafe fn update() -> bool {
     let conn = XCB_CONNECTION.as_ref().unwrap();
-    let event = conn.poll_for_event().unwrap();
-    match event {
-        Some(xcb::Event::X(x::Event::ConfigureNotify(ev))) => {
-            let new_width = ev.width() as u32;
-            let new_height = ev.height() as u32;
+    if let Ok(Some(xcb::Event::X(event))) = conn.poll_for_event() {
+        match event {
+            x::Event::ConfigureNotify(ev) => {
+                let new_width = ev.width() as u32;
+                let new_height = ev.height() as u32;
 
-            if new_width != WND_WIDTH || new_height != WND_HEIGHT {
-                WND_RESIZED = true;
-                info!("Window resized from {}x{} to {}x{}", WND_WIDTH, WND_HEIGHT, new_width, new_height);
+                if new_width != WND_WIDTH || new_height != WND_HEIGHT {
+                    WND_RESIZED = true;
+                    info!(
+                        "Window resized from {}x{} to {}x{}",
+                        WND_WIDTH, WND_HEIGHT, new_width, new_height
+                    );
+                    WND_WIDTH = new_width;
+                    WND_HEIGHT = new_height;
+                }
             }
-            WND_WIDTH = new_width;
-            WND_HEIGHT = new_height;
-        },
-        Some(xcb::Event::X(x::Event::FocusIn(ev))) => {
-            info!("Window focused");
-            WND_FOCUSED = true;
-        },
-        Some(xcb::Event::X(x::Event::FocusOut(ev))) => {
-            info!("Window unfocused");
-            WND_FOCUSED = false;
-        },
-        Some(xcb::Event::X(x::Event::ClientMessage(ev))) => {
-            match ev.data() {
-                x::ClientMessageData::Data32(atom) => {
+            x::Event::FocusIn(_) => {
+                info!("Window focused");
+                WND_FOCUSED = true;
+            }
+            x::Event::FocusOut(_) => {
+                info!("Window unfocused");
+                WND_FOCUSED = false;
+            }
+            x::Event::ClientMessage(ev) => {
+                if let x::ClientMessageData::Data32(atom) = ev.data() {
                     let delete_atom = get_xcb_atom("WM_DELETE_WINDOW");
                     let atom = mem::transmute::<u32, x::Atom>(atom[0]);
                     WND_CLOSED = atom == delete_atom;
-                },
-                _ => {}
+                }
             }
+            _ => {}
         }
-        _ => {}
     }
 
     !WND_CLOSED
@@ -139,13 +136,13 @@ pub unsafe fn shutdown() {
 
     debug!("Destroying window");
     conn.send_request(&x::DestroyWindow {
-        window: XCB_WND.unwrap()
+        window: XCB_WND.unwrap(),
     });
 
     info!("XCB video shutdown succeeded");
 }
 
-pub unsafe fn get_size(mut width: &u32, mut height: &u32) {
+pub unsafe fn set_size(mut width: &u32, mut height: &u32) {
     width = &WND_WIDTH;
     height = &WND_HEIGHT;
 }
