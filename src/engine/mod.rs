@@ -78,7 +78,7 @@ impl DataDirs {
 
     pub fn base() -> String {
         let basedirs = directories::BaseDirs::new().unwrap();
-        let subdir_path = basedirs.data_dir().to_str().unwrap().replace("\\", "/");
+        let subdir_path = basedirs.data_dir().to_str().unwrap().replace('\\', "/");
         format!("{subdir_path}/{GAME_NAME}/")
     }
 

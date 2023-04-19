@@ -1,30 +1,23 @@
+#[cfg(unix)]
 mod video_impl {
-    #[cfg(unix)]
-    pub use crate::platform::unix::video::*;
-    #[cfg(windows)]
-    pub use crate::platform::win32::video::*;
+    use crate::platform::unix::video;
+    static STATE: Mutex<Option<video::State>> = Mutex::new(None);
+    pub fn init()                   { *STATE.lock().unwrap() = Some(State::init())       }
+    pub fn update() -> bool         { STATE.lock().unwrap().as_mut().unwrap().update()   }
+    pub fn shutdown()               { STATE.lock().unwrap().as_mut().unwrap().shutdown() }
+    pub fn get_size() -> (u32, u32) { STATE.lock().unwrap().as_ref().unwrap().get_size() }
+    pub fn resized() -> bool        { STATE.lock().unwrap().as_mut().unwrap().resized()  }
+    pub fn focused() -> bool        { STATE.lock().unwrap().as_ref().unwrap().focused()  }
+}
+#[cfg(windows)]
+mod video_impl {
+    use crate::platform::win32::video;
+    pub fn init()                   { unsafe { video::init()     } }
+    pub fn update() -> bool         { unsafe { video::update()   } }
+    pub fn shutdown()               { unsafe { video::shutdown() } }
+    pub fn get_size() -> (u32, u32) { unsafe { video::get_size() } }
+    pub fn resized() -> bool        { unsafe { video::resized()  } }
+    pub fn focused() -> bool        { unsafe { video::focused()  } }
 }
 
-pub fn init() {
-    unsafe { video_impl::init() }
-}
-
-pub fn update() -> bool {
-    unsafe { video_impl::update() }
-}
-
-pub fn shutdown() {
-    unsafe { video_impl::shutdown() }
-}
-
-pub fn set_size(width: &u32, height: &u32) {
-    unsafe { video_impl::set_size(width, height) }
-}
-
-pub fn resized() -> bool {
-    unsafe { video_impl::resized() }
-}
-
-pub fn focused() -> bool {
-    unsafe { video_impl::focused() }
-}
+pub use video_impl::*;

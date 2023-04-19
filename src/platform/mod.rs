@@ -1,15 +1,15 @@
 pub mod video;
 
-#[cfg(windows)]
+// #[cfg(unix)]
+// mod unix;
+// #[cfg(windows)]
 mod win32;
-#[cfg(unix)]
-mod unix;
 
 mod platform_impl {
-    #[cfg(windows)]
+    // #[cfg(unix)]
+    // pub use crate::platform::unix::*;
+    // #[cfg(windows)]
     pub use crate::platform::win32::*;
-    #[cfg(unix)]
-    pub use crate::platform::unix::*;
 }
 
 pub fn init() {

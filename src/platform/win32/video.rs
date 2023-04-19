@@ -26,7 +26,7 @@ unsafe extern "system" fn wndproc(
     wparam: usize,
     lparam: isize,
 ) -> isize {
-    if WND == ptr::null_mut() || msgwnd == WND {
+    if WND.is_null() || msgwnd == WND {
         match msg {
             winuser::WM_SIZE => {
                 let mut client_area: windef::RECT = mem::zeroed();
@@ -106,7 +106,7 @@ unsafe fn init_wnd() {
     WND_WIDTH = (client_area.right - client_area.left) as u32;
     WND_HEIGHT = (client_area.bottom - client_area.top) as u32;
 
-    WND_TITLE = std::format!(
+    WND_TITLE = format!(
         "{} v{}.{}.{} by {}",
         crate::GAME_NAME,
         crate::GAME_VERSION_MAJOR,
@@ -133,7 +133,7 @@ unsafe fn init_wnd() {
         base_addr,
         ptr::null_mut(),
     );
-    if WND == ptr::null_mut() {
+    if WND.is_null() {
         let err = errhandlingapi::GetLastError();
         panic!("Failed to create window: error 0x{:X} {}", err, err);
     }
@@ -191,9 +191,8 @@ pub unsafe fn shutdown() {
     info!("Windows video shutdown succeeded");
 }
 
-pub unsafe fn get_size(mut width: &u32, mut height: &u32) {
-    width = &WND_WIDTH;
-    height = &WND_HEIGHT;
+pub unsafe fn get_size() -> (u32, u32) {
+    (WND_WIDTH, WND_HEIGHT)
 }
 
 pub unsafe fn resized() -> bool {

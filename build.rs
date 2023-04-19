@@ -4,7 +4,7 @@ fn main() {
     #[cfg(windows)]
     embed_resource::compile(
         "src/platform/win32/purpl.rc",
-        &[
+        [
             std::format!("GAME_NAME=\"{}\"", GAME_NAME),
             std::format!("GAME_EXECUTABLE_NAME=\"{}\"", GAME_EXECUTABLE_NAME),
             std::format!("GAME_ORGANIZATION_NAME=\"{}\"", GAME_ORGANIZATION_NAME),
