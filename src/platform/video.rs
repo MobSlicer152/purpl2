@@ -5,26 +5,32 @@ mod video_impl {
     pub use crate::platform::win32::video::*;
 }
 
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+use video_impl::State;
+
+static STATE: Lazy<Mutex<Option<State>>> = Lazy::new(|| Mutex::new(None));
+
 pub fn init() {
-    unsafe { video_impl::init() }
+    *STATE.lock().unwrap() = Some(State::init());
 }
 
 pub fn update() -> bool {
-    unsafe { video_impl::update() }
+    STATE.lock().unwrap().as_mut().unwrap().update()
 }
 
 pub fn shutdown() {
-    unsafe { video_impl::shutdown() }
+    STATE.lock().unwrap().as_mut().unwrap().shutdown()
 }
 
-pub fn set_size(width: &u32, height: &u32) {
-    unsafe { video_impl::set_size(width, height) }
+pub fn get_size() -> (u32, u32) {
+    STATE.lock().unwrap().as_mut().unwrap().get_size()
 }
 
 pub fn resized() -> bool {
-    unsafe { video_impl::resized() }
+    STATE.lock().unwrap().as_mut().unwrap().resized()
 }
 
 pub fn focused() -> bool {
-    unsafe { video_impl::focused() }
+    STATE.lock().unwrap().as_mut().unwrap().focused()
 }
