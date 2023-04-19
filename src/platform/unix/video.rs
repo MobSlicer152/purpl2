@@ -22,7 +22,7 @@ fn get_xcb_atom(connection: &xcb::Connection, name: &str) -> x::Atom {
 }
 
 impl State {
-    pub fn init() -> Self {
+    fn init() -> Self {
         info!("XCB video initialization started");
 
         let (connection, screen_num) = xcb::Connection::connect(None).unwrap();
@@ -34,7 +34,14 @@ impl State {
         let height = (screen.height_in_pixels() as f32 / 1.5) as u32;
         let width = height * 16 / 9;
         let window = connection.generate_id();
-        let title = String::new();
+        let title = format!(
+            "{} v{}.{}.{} by {}",
+            crate::GAME_NAME,
+            crate::GAME_VERSION_MAJOR,
+            crate::GAME_VERSION_MINOR,
+            crate::GAME_VERSION_PATCH,
+            crate::GAME_ORGANIZATION_NAME
+        );
 
         let cookie = connection.send_request_checked(&x::CreateWindow {
             depth: x::COPY_FROM_PARENT as u8,
@@ -98,7 +105,7 @@ impl State {
         }
     }
 
-    pub fn update(&mut self) -> bool {
+    fn update(&mut self) -> bool {
         if let Ok(Some(xcb::Event::X(event))) = self.connection.poll_for_event() {
             match event {
                 x::Event::ConfigureNotify(ev) => {
@@ -137,7 +144,7 @@ impl State {
         !self.closed
     }
 
-    pub fn shutdown(&mut self) {
+    fn shutdown(&mut self) {
         info!("XCB video shutdown started");
 
         debug!("Destroying window");
@@ -148,17 +155,17 @@ impl State {
         info!("XCB video shutdown succeeded");
     }
 
-    pub fn get_size(&self) -> (u32, u32) {
+    fn get_size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
-    pub fn resized(&mut self) -> bool {
+    fn resized(&mut self) -> bool {
         let ret = self.resized;
         self.resized = false;
         ret
     }
 
-    pub fn focused(&self) -> bool {
+    fn focused(&self) -> bool {
         self.focused
     }
 }
