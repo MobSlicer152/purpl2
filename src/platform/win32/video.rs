@@ -1,14 +1,14 @@
 use log::{debug, info};
 use std::mem;
 use std::ptr;
-use winapi::shared::windef;
-use winapi::um::errhandlingapi;
-use winapi::um::libloaderapi;
-use winapi::um::winuser;
+use std::sync::Arc;
+use windows_sys::Win32::Foundation::*;
+use windows_sys::Win32::System::LibraryLoader::*;
+use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 const IDI_ICON1: u32 = 103;
 
-static mut WND: windef::HWND = ptr::null_mut();
+static mut WND: HWND = 0;
 
 const WND_CLASS_NAME: &str = "PurplWindow";
 
@@ -21,17 +21,17 @@ static mut WND_FOCUSED: bool = false;
 static mut WND_CLOSED: bool = false;
 
 unsafe extern "system" fn wndproc(
-    msgwnd: windef::HWND,
+    msg_wnd: HWND,
     msg: u32,
     wparam: usize,
     lparam: isize,
 ) -> isize {
-    if WND.is_null() || msgwnd == WND {
+    if WND == 0 || msg_wnd == WND {
         match msg {
-            winuser::WM_SIZE => {
-                let mut client_area: windef::RECT = mem::zeroed();
+            WM_SIZE => {
+                let mut client_area: RECT = mem::zeroed();
 
-                winuser::GetClientRect(msgwnd, ptr::addr_of_mut!(client_area));
+                GetClientRect(msg_wnd, ptr::addr_of_mut!(client_area));
                 let new_width = (client_area.right - client_area.left) as u32;
                 let new_height = (client_area.bottom - client_area.top) as u32;
 
@@ -47,7 +47,7 @@ unsafe extern "system" fn wndproc(
                 WND_HEIGHT = new_height;
                 0
             }
-            winuser::WM_ACTIVATEAPP => {
+            WM_ACTIVATEAPP => {
                 WND_FOCUSED = wparam != 0;
                 info!(
                     "Window {}",
@@ -55,32 +55,32 @@ unsafe extern "system" fn wndproc(
                 );
                 0
             }
-            winuser::WM_DESTROY | winuser::WM_CLOSE => {
+            WM_CLOSE => {
                 info!("Window closed");
                 WND_CLOSED = true;
                 0
             }
-            _ => winuser::DefWindowProcA(msgwnd, msg, wparam, lparam),
+            _ => DefWindowProcA(msg_wnd, msg, wparam, lparam),
         }
     } else {
-        winuser::DefWindowProcA(msgwnd, msg, wparam, lparam)
+        DefWindowProcA(msg_wnd, msg, wparam, lparam)
     }
 }
 
 unsafe fn register_wndclass() {
-    let mut wnd_class: winuser::WNDCLASSEXA = mem::zeroed();
-    let base_addr = libloaderapi::GetModuleHandleA(ptr::null_mut());
+    let mut wnd_class: WNDCLASSEXA = mem::zeroed();
+    let base_addr = GetModuleHandleA(ptr::null_mut());
 
     debug!("Registering window class");
 
-    wnd_class.cbSize = mem::size_of::<winuser::WNDCLASSEXA>() as u32;
+    wnd_class.cbSize = mem::size_of::<WNDCLASSEXA>() as u32;
     wnd_class.lpfnWndProc = Some(wndproc);
     wnd_class.hInstance = base_addr;
-    wnd_class.hCursor = winuser::LoadCursorA(ptr::null_mut(), winuser::IDC_ARROW as *const i8);
-    wnd_class.hIcon = winuser::LoadIconA(base_addr, IDI_ICON1 as *const i8);
-    wnd_class.lpszClassName = WND_CLASS_NAME.as_ptr() as *const i8;
-    if winuser::RegisterClassExA(ptr::addr_of_mut!(wnd_class)) == 0 {
-        let err = errhandlingapi::GetLastError();
+    wnd_class.hCursor = LoadCursorA(0, IDC_ARROW as *const u8);
+    wnd_class.hIcon = LoadIconA(base_addr, IDI_ICON1 as *const u8);
+    wnd_class.lpszClassName = WND_CLASS_NAME.as_ptr();
+    if RegisterClassExA(ptr::addr_of_mut!(wnd_class)) == 0 {
+        let err = GetLastError();
         panic!(
             "Failed to register window class: error 0x{:X} ({})",
             err, err
@@ -91,16 +91,16 @@ unsafe fn register_wndclass() {
 }
 
 unsafe fn init_wnd() {
-    let mut client_area: windef::RECT = mem::zeroed();
-    let base_addr = libloaderapi::GetModuleHandleA(ptr::null_mut());
+    let mut client_area: RECT = mem::zeroed();
+    let base_addr = GetModuleHandleA(ptr::null_mut());
 
     client_area.left = 0;
-    client_area.right = (winuser::GetSystemMetrics(winuser::SM_CXSCREEN) as f32 / 1.5) as i32;
+    client_area.right = (GetSystemMetrics(SM_CXSCREEN) as f32 / 1.5) as i32;
     client_area.top = 0;
-    client_area.bottom = (winuser::GetSystemMetrics(winuser::SM_CYSCREEN) as f32 / 1.5) as i32;
-    winuser::AdjustWindowRect(
+    client_area.bottom = (GetSystemMetrics(SM_CYSCREEN) as f32 / 1.5) as i32;
+    AdjustWindowRect(
         ptr::addr_of_mut!(client_area),
-        winuser::WS_OVERLAPPEDWINDOW,
+        WS_OVERLAPPEDWINDOW,
         false as i32,
     );
     WND_WIDTH = (client_area.right - client_area.left) as u32;
@@ -119,26 +119,26 @@ unsafe fn init_wnd() {
         WND_WIDTH, WND_HEIGHT, WND_TITLE
     );
 
-    WND = winuser::CreateWindowExA(
+    WND = CreateWindowExA(
         0,
-        WND_CLASS_NAME.as_ptr() as *const i8,
-        WND_TITLE.as_ptr() as *const i8,
-        winuser::WS_OVERLAPPEDWINDOW,
-        winuser::CW_USEDEFAULT,
-        winuser::CW_USEDEFAULT,
+        WND_CLASS_NAME.as_ptr(),
+        WND_TITLE.as_ptr(),
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
         WND_WIDTH as i32,
         WND_HEIGHT as i32,
-        ptr::null_mut(),
-        ptr::null_mut(),
+        0,
+        0,
         base_addr,
-        ptr::null_mut(),
+        ptr::null_mut()
     );
-    if WND.is_null() {
-        let err = errhandlingapi::GetLastError();
+    if WND == 0 {
+        let err = GetLastError();
         panic!("Failed to create window: error 0x{:X} {}", err, err);
     }
 
-    winuser::GetClientRect(WND, ptr::addr_of_mut!(client_area));
+    GetClientRect(WND, ptr::addr_of_mut!(client_area));
     WND_WIDTH = (client_area.right - client_area.left) as u32;
     WND_HEIGHT = (client_area.bottom - client_area.top) as u32;
 
@@ -159,24 +159,24 @@ pub unsafe fn init() {
     init_wnd();
 
     debug!("Showing window");
-    winuser::ShowWindow(WND, winuser::SW_SHOW);
+    ShowWindow(WND, SW_SHOW);
 
     info!("Windows video initialization succeeded");
 }
 
 pub unsafe fn update() -> bool {
-    let mut msg: winuser::MSG = mem::zeroed();
+    let mut msg: MSG = mem::zeroed();
 
-    while winuser::PeekMessageA(
+    while PeekMessageA(
         ptr::addr_of_mut!(msg),
-        ptr::null_mut(),
         0,
         0,
-        winuser::PM_REMOVE,
+        0,
+        PM_REMOVE,
     ) != 0
     {
-        winuser::TranslateMessage(ptr::addr_of_mut!(msg));
-        winuser::DispatchMessageA(ptr::addr_of_mut!(msg));
+        TranslateMessage(ptr::addr_of_mut!(msg));
+        DispatchMessageA(ptr::addr_of_mut!(msg));
     }
 
     !WND_CLOSED
@@ -186,7 +186,7 @@ pub unsafe fn shutdown() {
     info!("Windows video shutdown started");
 
     debug!("Destroying window");
-    winuser::DestroyWindow(WND);
+    DestroyWindow(WND);
 
     info!("Windows video shutdown succeeded");
 }
@@ -203,4 +203,14 @@ pub unsafe fn resized() -> bool {
 
 pub unsafe fn focused() -> bool {
     WND_FOCUSED
+}
+
+#[cfg(all(windows, not(xbox)))]
+pub unsafe fn create_vulkan_surface(instance: Arc<vulkano::instance::Instance>) -> Arc<vulkano::swapchain::Surface> {
+    vulkano::swapchain::Surface::from_win32(
+        instance.clone(),
+        GetModuleHandleA(ptr::null_mut()) as *const u8,
+        WND as *const u8,
+        None
+    ).unwrap_or_else(|err| panic!("Failed to create HWND surface: {}", err))
 }

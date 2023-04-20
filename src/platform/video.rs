@@ -1,7 +1,7 @@
-#[cfg(unix)]
+#[cfg(any(linux, freebsd, dragonfly, openbsd, netbsd))]
 mod video_impl {
     use crate::platform::unix::video;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     static STATE: Mutex<Option<video::State>> = Mutex::new(None);
     pub fn init() {
@@ -22,9 +22,14 @@ mod video_impl {
     pub fn focused() -> bool {
         STATE.lock().unwrap().as_ref().unwrap().focused()
     }
+    pub fn create_vulkan_surface(instance: Arc<vulkano::instance::Instance>) -> Arc<vulkano::swapchain::Surface> {
+        STATE.lock().unwrap().as_ref().unwrap().create_vulkan_surface(instance)
+    }
 }
-#[cfg(windows)]
+#[cfg(any(windows, xbox))]
 mod video_impl {
+    use std::sync::Arc;
+
     use crate::platform::win32::video;
     pub fn init() {
         unsafe { video::init() }
@@ -43,6 +48,10 @@ mod video_impl {
     }
     pub fn focused() -> bool {
         unsafe { video::focused() }
+    }
+    #[cfg(all(windows, not(xbox)))]
+    pub fn create_vulkan_surface(instance: Arc<vulkano::instance::Instance>) -> Arc<vulkano::swapchain::Surface> {
+        unsafe { video::create_vulkan_surface(instance) }
     }
 }
 

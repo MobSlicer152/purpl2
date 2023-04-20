@@ -4,14 +4,14 @@ pub struct Shader {
     name: String,
     vertex_binary: Vec<u8>,
     fragment_binary: Vec<u8>,
-    //#[cfg(feature = "vulkan")]
+    //#[cfg(not(any(macos, ios)))]
     //handle: VulkanShader,
 }
 
 pub struct RenderTexture {
     name: String,
     //texture: Texture,
-    //#[cfg(feature = "vulkan")]
+    //#[cfg(not(any(macos, ios)))]
     //handle: VulkanTexture,
 }
 
@@ -25,7 +25,7 @@ pub struct Model {
     name: String,
     //mesh: Mesh,
     material: Material,
-    //#[cfg(feature = "vulkan")]
+    //#[cfg(not(any(macos, ios)))]
     //handle: VulkanModel
 }
 
@@ -33,11 +33,11 @@ pub trait Renderable {
     fn render();
 }
 
-#[cfg(feature = "vulkan")]
+#[cfg(not(any(macos, ios, xbox)))]
 mod vulkan;
 
 mod render_impl {
-    #[cfg(feature = "vulkan")]
+    #[cfg(not(any(macos, ios, xbox)))]
     pub use crate::engine::rendersystem::vulkan::*;
 }
 

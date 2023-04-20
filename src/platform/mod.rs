@@ -2,13 +2,13 @@ pub mod video;
 
 #[cfg(unix)]
 mod unix;
-#[cfg(windows)]
+#[cfg(any(windows, xbox))]
 mod win32;
 
 mod platform_impl {
     #[cfg(unix)]
     pub use crate::platform::unix::*;
-    #[cfg(windows)]
+    #[cfg(any(windows, xbox))]
     pub use crate::platform::win32::*;
 }
 
