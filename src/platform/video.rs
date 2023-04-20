@@ -22,7 +22,7 @@ mod video_impl {
     pub fn focused() -> bool {
         STATE.lock().unwrap().as_ref().unwrap().focused()
     }
-    pub fn create_vulkan_surface(instance: Arc<vulkano::instance::Instance>) -> Arc<vulkano::swapchain::Surface> {
+    pub unsafe fn create_vulkan_surface(instance: Arc<vulkano::instance::Instance>) -> vk:: {
         STATE.lock().unwrap().as_ref().unwrap().create_vulkan_surface(instance)
     }
 }
@@ -50,8 +50,8 @@ mod video_impl {
         unsafe { video::focused() }
     }
     #[cfg(all(windows, not(xbox)))]
-    pub fn create_vulkan_surface(instance: Arc<vulkano::instance::Instance>) -> Arc<vulkano::swapchain::Surface> {
-        unsafe { video::create_vulkan_surface(instance) }
+    pub unsafe fn create_vulkan_surface(instance: ) ->  {
+        video::create_vulkan_surface(instance)
     }
 }
 

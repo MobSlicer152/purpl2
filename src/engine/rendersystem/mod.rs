@@ -43,16 +43,16 @@ mod render_impl {
 
 pub fn init() {
     info!("Render system initialization started");
-    render_impl::init();
+    render_impl::State::init();
     info!("Render system initialization succeeded");
 }
 
 pub fn begin_cmds() {
-    render_impl::begin_cmds()
+    render_impl::State::begin_cmds()
 }
 
 pub fn present() {
-    render_impl::present()
+    render_impl::State::present()
 }
 
 pub fn shutdown() {

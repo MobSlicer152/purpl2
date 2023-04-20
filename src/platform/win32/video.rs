@@ -1,3 +1,4 @@
+use ash::{extensions, vk};
 use log::{debug, info};
 use std::mem;
 use std::ptr;
@@ -206,7 +207,7 @@ pub unsafe fn focused() -> bool {
 }
 
 #[cfg(all(windows, not(xbox)))]
-pub unsafe fn create_vulkan_surface(instance: Arc<vulkano::instance::Instance>) -> Arc<vulkano::swapchain::Surface> {
+pub unsafe fn create_vulkan_surface(instance: vk::Instance) -> extensions::khr:: {
     vulkano::swapchain::Surface::from_win32(
         instance.clone(),
         GetModuleHandleA(ptr::null_mut()) as *const u8,
