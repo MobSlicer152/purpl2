@@ -22,7 +22,7 @@ fn get_xcb_atom(connection: &xcb::Connection, name: &str) -> x::Atom {
 }
 
 impl State {
-    fn init() -> Self {
+    pub fn init() -> Self {
         info!("XCB video initialization started");
 
         let (connection, screen_num) = xcb::Connection::connect(None).unwrap();
@@ -105,7 +105,7 @@ impl State {
         }
     }
 
-    fn update(&mut self) -> bool {
+    pub fn update(&mut self) -> bool {
         if let Ok(Some(xcb::Event::X(event))) = self.connection.poll_for_event() {
             match event {
                 x::Event::ConfigureNotify(ev) => {
@@ -144,7 +144,7 @@ impl State {
         !self.closed
     }
 
-    fn shutdown(&mut self) {
+    pub fn shutdown(&mut self) {
         info!("XCB video shutdown started");
 
         debug!("Destroying window");
@@ -155,17 +155,17 @@ impl State {
         info!("XCB video shutdown succeeded");
     }
 
-    fn get_size(&self) -> (u32, u32) {
+    pub fn get_size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
-    fn resized(&mut self) -> bool {
+    pub fn resized(&mut self) -> bool {
         let ret = self.resized;
         self.resized = false;
         ret
     }
 
-    fn focused(&self) -> bool {
+    pub fn focused(&self) -> bool {
         self.focused
     }
 }
