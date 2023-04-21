@@ -170,8 +170,9 @@ impl State {
             acquire_semaphores: acquire_semaphores,
             render_complete_semaphores: render_complete_semaphores,
             swapchain: swapchain,
+            swapchain_images: swapchain_images,
             surface_format: surface_format,
-            
+            swapchain_extent: swapchain_extent
         }
     }
     
