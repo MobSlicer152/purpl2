@@ -208,12 +208,14 @@ pub unsafe fn focused() -> bool {
 }
 
 #[cfg(not(xbox))]
-pub unsafe fn create_vulkan_surface(entry: ash::Entry, instance: ash::Instance, alloc_callbacks: vk::AllocationCallbacks) -> vk::SurfaceKHR {
-    extensions::khr::Win32Surface::new(&entry, &instance)
-        .create_win32_surface(&vk::Win32SurfaceCreateInfoKHR {
-            hinstance: GetModuleHandleA(ptr::null_mut()) as *const os::raw::c_void,
-            hwnd: WND as *const os::raw::c_void,
-            ..Default::default()
-        }, Some(&alloc_callbacks))
-        .unwrap_or_else(|err| panic!("Failed to create HWND surface: {}", err))
+pub fn create_vulkan_surface(entry: ash::Entry, instance: ash::Instance, alloc_callbacks: vk::AllocationCallbacks) -> vk::SurfaceKHR {
+    unsafe {
+        extensions::khr::Win32Surface::new(&entry, &instance)
+            .create_win32_surface(&vk::Win32SurfaceCreateInfoKHR {
+                hinstance: GetModuleHandleA(ptr::null_mut()) as *const os::raw::c_void,
+                hwnd: WND as *const os::raw::c_void,
+                ..Default::default()
+            }, Some(&alloc_callbacks))
+            .unwrap_or_else(|err| panic!("Failed to create HWND surface: {}", err))
+    }
 }

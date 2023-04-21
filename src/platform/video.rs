@@ -50,7 +50,7 @@ mod video_impl {
         unsafe { video::focused() }
     }
     #[cfg(all(windows, not(xbox)))]
-    pub unsafe fn create_vulkan_surface(entry: ash::Entry, instance: ash::Instance, alloc_callbacks: ash::vk::AllocationCallbacks) -> ash::vk::SurfaceKHR {
+    pub fn create_vulkan_surface(entry: ash::Entry, instance: ash::Instance, alloc_callbacks: ash::vk::AllocationCallbacks) -> ash::vk::SurfaceKHR {
         video::create_vulkan_surface(entry, instance, alloc_callbacks)
     }
 }

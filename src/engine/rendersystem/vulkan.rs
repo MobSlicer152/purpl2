@@ -28,6 +28,8 @@ const ALLOCATION_CALLBACKS: vk::AllocationCallbacks = vk::AllocationCallbacks {
     ..Default::default()
 };
 
+const FRAME_COUNT: usize = 3;
+
 struct GpuInfo {
     device: vk::PhysicalDevice,
     props: vk::PhysicalDeviceProperties,
@@ -45,7 +47,7 @@ pub struct State {
     instance: ash::Instance,
     device: ash::Device,
     
-    surface: extensions::khr::Surface,
+    surface: vk::SurfaceKHR,
     
     gpu: GpuInfo,
     gpus: Vec<GpuInfo>,
@@ -53,7 +55,12 @@ pub struct State {
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
 
-    swapchain: extensions::khr::Swapchain,
+    fences: [vk::Fence; FRAME_COUNT],
+    acquire_semaphores: [vk::Semaphore; FRAME_COUNT],
+    render_complete_semaphores: [vk::Semaphore; FRAME_COUNT],
+
+    swapchain: vk::SwapchainKHR,
+    swapchain_images: Vec<vk::Image>,
     surface_format: vk::SurfaceFormatKHR,
     swapchain_extent: vk::Extent2D,
 }
@@ -109,22 +116,44 @@ impl State {
         0
     }
 
-    unsafe fn create_device(instance: vk::Instance, gpu: GpuInfo) -> (vk::Device, vk::Queue, vk::Queue) {
+    fn create_device(instance: vk::Instance, gpu: GpuInfo) -> (ash::Device, vk::Queue, vk::Queue) {
 
     }
-    
+
+    fn create_fences(device: ash::Device) -> [vk::Fence; FRAME_COUNT] {
+
+    }
+
+    fn create_semaphores(device: ash::Device) -> ([vk::Semaphore; FRAME_COUNT], [vk::Semaphore; FRAME_COUNT]) {
+        
+    }
+
+    fn choose_surface_format(gpu: GpuInfo) -> vk::SurfaceFormatKHR {
+
+    }
+
+    fn create_swapchain(device: ash::Device, surface_format: vk::SurfaceFormatKHR, swapchain_extent: vk::Extent2D) -> (vk::SwapchainKHR, Vec<vk::Image>) {
+
+    }
+
     pub fn init() -> Self {
         debug!("Vulkan initialization started");
 
         debug!("Loading Vulkan library");
-        let entry = vulkan_check!(ash::Entry::load());
+        let entry = unsafe { vulkan_check!(ash::Entry::load()) };
 
         let instance = Self::create_instance(entry);
-        let surface = unsafe { crate::platform::video::create_vulkan_surface(entry, instance, ALLOCATION_CALLBACKS) };
+        let surface = crate::platform::video::create_vulkan_surface(entry, instance, ALLOCATION_CALLBACKS);
         let gpus = Self::get_gpus(instance.handle());
         let gpu_idx = Self::select_gpu(gpus);
         let gpu = gpus[gpu_idx];
-        let (device, graphics_queue, present_queue) = unsafe { Self::create_device(instance.handle(), gpu) };
+        let (device, graphics_queue, present_queue) = Self::create_device(instance.handle(), gpu);
+        let fences = Self::create_fences(device);
+        let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(device);
+        let surface_format = Self::choose_surface_format(gpu);
+        let video_size = crate::platform::video::get_size();
+        let swapchain_extent = vk::Extent2D { width: video_size.0, height: video_size.1 };
+        let (swapchain, swapchain_images) = Self::create_swapchain(device, surface_format, swapchain_extent);
 
         debug!("Vulkan initialization succeeded");
 
@@ -132,11 +161,17 @@ impl State {
             entry: entry,
             instance: instance,
             surface: surface,
+            device: device,
             gpu: gpu,
             gpus: gpus,
-            device: device,
             graphics_queue: graphics_queue,
             present_queue: present_queue,
+            fences: fences,
+            acquire_semaphores: acquire_semaphores,
+            render_complete_semaphores: render_complete_semaphores,
+            swapchain: swapchain,
+            surface_format: surface_format,
+            
         }
     }
     
