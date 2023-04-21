@@ -57,6 +57,6 @@ pub fn present() {
 
 pub fn shutdown() {
     info!("Render system shutdown started");
-    render_impl::shutdown();
+    render_impl::State::shutdown();
     info!("Render system shutdown succeeded");
 }

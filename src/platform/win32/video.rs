@@ -1,6 +1,7 @@
 use ash::{extensions, vk};
 use log::{debug, info};
 use std::mem;
+use std::os;
 use std::ptr;
 use std::sync::Arc;
 use windows_sys::Win32::Foundation::*;
@@ -206,12 +207,13 @@ pub unsafe fn focused() -> bool {
     WND_FOCUSED
 }
 
-#[cfg(all(windows, not(xbox)))]
-pub unsafe fn create_vulkan_surface(instance: vk::Instance) -> extensions::khr:: {
-    vulkano::swapchain::Surface::from_win32(
-        instance.clone(),
-        GetModuleHandleA(ptr::null_mut()) as *const u8,
-        WND as *const u8,
-        None
-    ).unwrap_or_else(|err| panic!("Failed to create HWND surface: {}", err))
+#[cfg(not(xbox))]
+pub unsafe fn create_vulkan_surface(entry: ash::Entry, instance: ash::Instance, alloc_callbacks: vk::AllocationCallbacks) -> vk::SurfaceKHR {
+    extensions::khr::Win32Surface::new(&entry, &instance)
+        .create_win32_surface(&vk::Win32SurfaceCreateInfoKHR {
+            hinstance: GetModuleHandleA(ptr::null_mut()) as *const os::raw::c_void,
+            hwnd: WND as *const os::raw::c_void,
+            ..Default::default()
+        }, Some(&alloc_callbacks))
+        .unwrap_or_else(|err| panic!("Failed to create HWND surface: {}", err))
 }

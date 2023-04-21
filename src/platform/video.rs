@@ -22,8 +22,8 @@ mod video_impl {
     pub fn focused() -> bool {
         STATE.lock().unwrap().as_ref().unwrap().focused()
     }
-    pub unsafe fn create_vulkan_surface(instance: Arc<vulkano::instance::Instance>) -> vk:: {
-        STATE.lock().unwrap().as_ref().unwrap().create_vulkan_surface(instance)
+    pub unsafe fn create_vulkan_surface(entry: ash::Entry, instance: ash::Instance, alloc_callbacks: vk::AllocationCallbacks) -> extensions::khr::SurfaceKHR {
+        STATE.lock().unwrap().as_ref().unwrap().create_vulkan_surface(entry, instance, alloc_callbacks)
     }
 }
 #[cfg(any(windows, xbox))]
@@ -50,8 +50,8 @@ mod video_impl {
         unsafe { video::focused() }
     }
     #[cfg(all(windows, not(xbox)))]
-    pub unsafe fn create_vulkan_surface(instance: ) ->  {
-        video::create_vulkan_surface(instance)
+    pub unsafe fn create_vulkan_surface(entry: ash::Entry, instance: ash::Instance, alloc_callbacks: ash::vk::AllocationCallbacks) -> ash::vk::SurfaceKHR {
+        video::create_vulkan_surface(entry, instance, alloc_callbacks)
     }
 }
 

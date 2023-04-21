@@ -169,14 +169,14 @@ impl State {
         self.focused
     }
 
-    pub fn create_vulkan_surface(instance: Arc<vulkano::instance::Instance>) -> Arc<vulkano::swapchain::Surface> {
-        unsafe {
-            vulkano::swapchain::Surface::from_xcb(
-                instance.clone(),
-                self.connection,
-                self.window as u32,
-                None
-            ).unwrap_or_else(|err| panic!("Failed to create XCB surface: {}", err))
-        }
+    
+    pub unsafe fn create_vulkan_surface(entry: ash::Entry, instance: ash::Instance, alloc_callbacks: vk::AllocationCallbacks) -> vk::SurfaceKHR {
+        extensions::khr::XcbSurface::new(&entry, &instance)
+            .create_win32_surface(&vk::XcbSurfaceCreateInfoKHR {
+                connection: self.connection,
+                window: self.window,
+                ..Default::default()
+            }, Some(&alloc_callbacks))
+            .unwrap_or_else(|err| panic!("Failed to create XCB surface: {}", err))
     }
 }
