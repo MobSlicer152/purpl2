@@ -109,7 +109,7 @@ impl State {
         0
     }
 
-    unsafe fn create_device(instance: vk::Instance, gpu: GpuInfo) -> (vk::Device, vk::Queue, vk::Queue) {
+    unsafe fn create_device(instance: vk::Instance, gpu: GpuInfo) -> (ash::Device, vk::Queue, vk::Queue) {
 
     }
     
@@ -132,9 +132,9 @@ impl State {
             entry: entry,
             instance: instance,
             surface: surface,
+            device: device,
             gpu: gpu,
             gpus: gpus,
-            device: device,
             graphics_queue: graphics_queue,
             present_queue: present_queue,
         }
