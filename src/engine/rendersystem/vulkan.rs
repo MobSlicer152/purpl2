@@ -123,9 +123,6 @@ impl State {
         if types.contains(vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION) {
             location += "VALIDATION ";
         }
-        if types.contains(vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING) {
-            location += "DEVICE ADDRESS BINDING ";
-        }
 
         let message_ptr = (*callback_data).p_message as *const ffi::c_char;
         let message_raw = unsafe { ffi::CStr::from_ptr(message_ptr) };
@@ -186,8 +183,7 @@ impl State {
                 | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
             message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
                 | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                | vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING,
+                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
             pfn_user_callback: Some(Self::debug_log),
             ..Default::default()
         };

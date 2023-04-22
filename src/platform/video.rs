@@ -1,4 +1,4 @@
-#[cfg(any(linux, freebsd, dragonfly, openbsd, netbsd))]
+#[cfg(all(unix, not(any(macos, ios))))]
 mod video_impl {
     use crate::platform::unix::video;
     use std::sync::{Arc, Mutex};
@@ -25,7 +25,7 @@ mod video_impl {
     pub fn create_vulkan_surface(
         entry: &ash::Entry,
         instance: &ash::Instance,
-        alloc_callbacks: Option<ash::vk::AllocationCallbacks>,
+        alloc_callbacks: Option<&ash::vk::AllocationCallbacks>,
     ) -> ash::vk::SurfaceKHR {
         STATE
             .lock()
