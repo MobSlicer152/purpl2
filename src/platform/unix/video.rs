@@ -169,14 +169,22 @@ impl State {
         self.focused
     }
 
-    
-    pub unsafe fn create_vulkan_surface(entry: ash::Entry, instance: ash::Instance, alloc_callbacks: vk::AllocationCallbacks) -> vk::SurfaceKHR {
-        extensions::khr::XcbSurface::new(&entry, &instance)
-            .create_win32_surface(&vk::XcbSurfaceCreateInfoKHR {
-                connection: self.connection,
-                window: self.window,
-                ..Default::default()
-            }, Some(&alloc_callbacks))
-            .unwrap_or_else(|err| panic!("Failed to create XCB surface: {}", err))
+    pub fn create_vulkan_surface(
+        entry: &ash::Entry,
+        instance: &ash::Instance,
+        alloc_callbacks: Option<&vk::AllocationCallbacks>,
+    ) -> vk::SurfaceKHR {
+        unsafe {
+            extensions::khr::XcbSurface::new(&entry, &instance)
+                .create_win32_surface(
+                    &vk::XcbSurfaceCreateInfoKHR {
+                        connection: self.connection,
+                        window: self.window,
+                        ..Default::default()
+                    },
+                    alloc_callbacks,
+                )
+                .unwrap_or_else(|err| panic!("Failed to create XCB surface: {}", err))
+        }
     }
 }

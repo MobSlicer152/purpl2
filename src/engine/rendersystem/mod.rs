@@ -1,4 +1,5 @@
 use log::info;
+use std::sync::{Mutex};
 
 pub struct Shader {
     name: String,
@@ -21,16 +22,16 @@ pub struct Material {
     texture: RenderTexture,
 }
 
+pub trait Renderable {
+    fn render();
+}
+
 pub struct Model {
     name: String,
     //mesh: Mesh,
     material: Material,
     //#[cfg(not(any(macos, ios)))]
     //handle: VulkanModel
-}
-
-pub trait Renderable {
-    fn render();
 }
 
 #[cfg(not(any(macos, ios, xbox)))]
@@ -40,23 +41,31 @@ mod render_impl {
     #[cfg(not(any(macos, ios, xbox)))]
     pub use crate::engine::rendersystem::vulkan::*;
 }
+    
+static STATE: Mutex<Option<render_impl::State>> = Mutex::new(None);
 
 pub fn init() {
     info!("Render system initialization started");
-    render_impl::State::init();
+    *STATE.lock().unwrap() = Some(render_impl::State::init());
     info!("Render system initialization succeeded");
 }
 
 pub fn begin_cmds() {
-    render_impl::State::begin_cmds()
+    //STATE.lock().unwrap().as_ref().unwrap().begin_cmds()
 }
 
 pub fn present() {
-    render_impl::State::present()
+    //STATE.lock().unwrap().as_ref().unwrap().present()
 }
 
 pub fn shutdown() {
     info!("Render system shutdown started");
-    render_impl::State::shutdown();
+    STATE.lock().unwrap().as_ref().unwrap().shutdown();
     info!("Render system shutdown succeeded");
+}
+
+impl Renderable for Model {
+    fn render() {
+//        STATE.lock().unwrap().as_ref().unwrap().render_model()
+    }
 }

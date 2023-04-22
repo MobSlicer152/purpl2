@@ -1,8 +1,6 @@
 use ash::{extensions, vk};
 use log::{debug, info};
-use std::mem;
-use std::os;
-use std::ptr;
+use std::{ffi, mem, ptr};
 use std::sync::Arc;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::System::LibraryLoader::*;
@@ -22,12 +20,7 @@ static mut WND_RESIZED: bool = false;
 static mut WND_FOCUSED: bool = false;
 static mut WND_CLOSED: bool = false;
 
-unsafe extern "system" fn wndproc(
-    msg_wnd: HWND,
-    msg: u32,
-    wparam: usize,
-    lparam: isize,
-) -> isize {
+unsafe extern "system" fn wndproc(msg_wnd: HWND, msg: u32, wparam: usize, lparam: isize) -> isize {
     if WND == 0 || msg_wnd == WND {
         match msg {
             WM_SIZE => {
@@ -133,7 +126,7 @@ unsafe fn init_wnd() {
         0,
         0,
         base_addr,
-        ptr::null_mut()
+        ptr::null_mut(),
     );
     if WND == 0 {
         let err = GetLastError();
@@ -169,14 +162,7 @@ pub unsafe fn init() {
 pub unsafe fn update() -> bool {
     let mut msg: MSG = mem::zeroed();
 
-    while PeekMessageA(
-        ptr::addr_of_mut!(msg),
-        0,
-        0,
-        0,
-        PM_REMOVE,
-    ) != 0
-    {
+    while PeekMessageA(ptr::addr_of_mut!(msg), 0, 0, 0, PM_REMOVE) != 0 {
         TranslateMessage(ptr::addr_of_mut!(msg));
         DispatchMessageA(ptr::addr_of_mut!(msg));
     }
@@ -208,12 +194,21 @@ pub unsafe fn focused() -> bool {
 }
 
 #[cfg(not(xbox))]
-pub unsafe fn create_vulkan_surface(entry: ash::Entry, instance: ash::Instance, alloc_callbacks: vk::AllocationCallbacks) -> vk::SurfaceKHR {
-    extensions::khr::Win32Surface::new(&entry, &instance)
-        .create_win32_surface(&vk::Win32SurfaceCreateInfoKHR {
-            hinstance: GetModuleHandleA(ptr::null_mut()) as *const os::raw::c_void,
-            hwnd: WND as *const os::raw::c_void,
-            ..Default::default()
-        }, Some(&alloc_callbacks))
-        .unwrap_or_else(|err| panic!("Failed to create HWND surface: {}", err))
+pub fn create_vulkan_surface(
+    entry: &ash::Entry,
+    instance: &ash::Instance,
+    alloc_callbacks: Option<&vk::AllocationCallbacks>,
+) -> vk::SurfaceKHR {
+    unsafe {
+        extensions::khr::Win32Surface::new(&entry, &instance)
+            .create_win32_surface(
+                &vk::Win32SurfaceCreateInfoKHR {
+                    hinstance: GetModuleHandleA(ptr::null_mut()) as *const ffi::c_void,
+                    hwnd: WND as *const ffi::c_void,
+                    ..Default::default()
+                },
+                alloc_callbacks,
+            )
+            .unwrap_or_else(|err| panic!("Failed to create HWND surface: {}", err))
+    }
 }
