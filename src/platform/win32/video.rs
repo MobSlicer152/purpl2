@@ -1,7 +1,7 @@
 use ash::{extensions, vk};
 use log::{debug, info};
-use std::{ffi, mem, ptr};
 use std::sync::Arc;
+use std::{ffi, mem, ptr};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::System::LibraryLoader::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
