@@ -1,5 +1,5 @@
 use log::info;
-use std::sync::{Mutex};
+use std::sync::Mutex;
 
 pub struct Shader {
     name: String,
@@ -41,7 +41,7 @@ mod render_impl {
     #[cfg(not(any(macos, ios, xbox)))]
     pub use crate::engine::rendersystem::vulkan::*;
 }
-    
+
 static STATE: Mutex<Option<render_impl::State>> = Mutex::new(None);
 
 pub fn init() {
@@ -66,6 +66,6 @@ pub fn shutdown() {
 
 impl Renderable for Model {
     fn render() {
-//        STATE.lock().unwrap().as_ref().unwrap().render_model()
+        //        STATE.lock().unwrap().as_ref().unwrap().render_model()
     }
 }

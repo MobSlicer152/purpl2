@@ -1,7 +1,7 @@
 use ash::{extensions, vk};
-use log::{debug, error};
+use log::{debug, error, log};
 use std::sync::{Arc, Mutex};
-use std::{cmp, ffi, mem, os, ptr};
+use std::{alloc, cmp, ffi, mem, os, ptr};
 
 macro_rules! vulkan_check {
     ($call: expr) => {
@@ -16,8 +16,7 @@ extern "system" fn vulkan_alloc(
     allocation_scope: vk::SystemAllocationScope,
 ) -> *mut ffi::c_void {
     unsafe {
-        std::alloc::alloc(std::alloc::Layout::from_size_align(size, alignment).unwrap())
-            as *mut ffi::c_void
+        alloc::alloc(alloc::Layout::from_size_align(size, alignment).unwrap()) as *mut ffi::c_void
     }
 }
 
@@ -29,9 +28,9 @@ extern "system" fn vulkan_realloc(
     allocation_scope: vk::SystemAllocationScope,
 ) -> *mut ffi::c_void {
     unsafe {
-        std::alloc::realloc(
+        alloc::realloc(
             p_original as *mut u8,
-            std::alloc::Layout::from_size_align(size, alignment).unwrap(),
+            alloc::Layout::from_size_align(size, alignment).unwrap(),
             size,
         ) as *mut ffi::c_void
     }
@@ -39,9 +38,9 @@ extern "system" fn vulkan_realloc(
 
 extern "system" fn vulkan_dealloc(p_user_data: *mut ffi::c_void, p_memory: *mut ffi::c_void) {
     unsafe {
-        std::alloc::dealloc(
+        alloc::dealloc(
             p_memory as *mut u8,
-            std::alloc::Layout::from_size_align(0, 1).unwrap(),
+            alloc::Layout::from_size_align(0, 1).unwrap(),
         )
     }
 }
@@ -59,7 +58,6 @@ const FRAME_COUNT: usize = 3;
 
 struct GpuInfo {
     device: vk::PhysicalDevice,
-    usable: bool,
 
     mem_props: vk::PhysicalDeviceMemoryProperties,
     props: vk::PhysicalDeviceProperties,
@@ -69,8 +67,8 @@ struct GpuInfo {
     present_modes: Vec<vk::PresentModeKHR>,
 
     queue_family_props: Vec<vk::QueueFamilyProperties>,
-    graphics_family_idx: Option<u32>,
-    present_family_idx: Option<u32>,
+    graphics_family_idx: u32,
+    present_family_idx: u32,
 
     ext_props: Vec<vk::ExtensionProperties>,
 }
@@ -113,7 +111,8 @@ impl State {
             _ => log::Level::Debug,
         };
 
-        let mut location = "".to_owned();
+        let mut location = String::new();
+
         if types.contains(vk::DebugUtilsMessageTypeFlagsEXT::GENERAL) {
             location += "GENERAL ";
         }
@@ -127,7 +126,7 @@ impl State {
         let message_ptr = (*callback_data).p_message as *const ffi::c_char;
         let message_raw = unsafe { ffi::CStr::from_ptr(message_ptr) };
         let message = message_raw.to_str().unwrap();
-        log::log!(log_level, "VULKAN {}MESSAGE: {}", location, message);
+        log!(log_level, "VULKAN {}MESSAGE: {}", location, message);
 
         vk::TRUE
     }
@@ -202,19 +201,19 @@ impl State {
         };
 
         let result = unsafe { entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) };
-        let instance = if let Err(err) = result {
-            if err == vk::Result::ERROR_LAYER_NOT_PRESENT {
+        let instance = match result {
+            Ok(val) => val,
+            Err(err) if err == vk::Result::ERROR_LAYER_NOT_PRESENT => {
                 debug!("Validation layers not available, retrying with them disabled");
                 create_info.enabled_layer_count = 0;
-                unsafe { vulkan_check!(entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS))) }
-            } else {
-                panic!("Vulkan call entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) failed: {}", err);
-                unsafe { entry.create_instance(&create_info, None).unwrap() } // unreachable, but required
+                unsafe {
+                    vulkan_check!(entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)))
+                }
             }
-        } else {
-            result.unwrap()
+            Err(err) => 
+                panic!("Vulkan call entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) failed: {err}")
         };
-
+        
         debug!("Created Vulkan instance successfully");
         instance
     }
@@ -230,149 +229,111 @@ impl State {
     ) -> Vec<GpuInfo> {
         debug!("Enumerating devices");
         let devices = unsafe { vulkan_check!(instance.enumerate_physical_devices()) };
+        let devices = devices
+            .into_iter()
+            .enumerate()
+            .map(|(i, device)| (i + 1, device));
 
         let mut gpus: Vec<GpuInfo> = Vec::new();
         let mut usable_count = 0;
-        for i in 0..devices.len() {
-            let device = devices[i];
-            let mut usable = true;
-
-            debug!("Getting information for device {}", i + 1);
+        for (i, device) in devices {
+            debug!("Getting information for device {i}");
             let queue_family_props =
                 unsafe { instance.get_physical_device_queue_family_properties(device) };
             if queue_family_props.len() < 1 {
-                usable = false;
-                error!("Ignoring GPU {} because it has no queue families", i + 1);
+                error!("Ignoring GPU {i} because it has no queue families");
                 continue;
             }
 
-            let mut graphics_family_idx = None;
-            let mut present_family_idx = None;
-            for j in 0..queue_family_props.len() {
-                let props = &queue_family_props[j];
-
-                if props.queue_count < 1 {
-                    continue;
-                }
-
-                if props.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
-                    graphics_family_idx = Some(j as u32);
-                }
-
-                let surface_support = unsafe {
-                    surface_loader
-                        .get_physical_device_surface_support(device, j as u32, *surface)
-                        .unwrap_or_else(|err| {
-                            panic!(
-                                "Failed to check surface support for device {}: {}",
-                                i + 1,
-                                err
-                            )
-                        })
-                };
-                if surface_support {
-                    present_family_idx = Some(j as u32);
-                }
-
-                if graphics_family_idx.is_some() && present_family_idx.is_some() {
-                    break;
-                }
-            }
-
-            if graphics_family_idx.is_none() || present_family_idx.is_none() {
-                usable = false;
-                error!("Failed to get all required queue familiy indices for device {} (graphics {}, present {})", i + 1, graphics_family_idx.unwrap_or(u32::MAX), present_family_idx.unwrap_or(u32::MAX));
+            let Some((family_idx, _)) = queue_family_props
+                .iter()
+                .enumerate()
+                .map(|(i, props)| (i as u32, props))
+                .find(|(i, props)| {
+                    props.queue_count >= 1
+                        && props.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+                        && unsafe {
+                            surface_loader
+                                .get_physical_device_surface_support(device, *i, *surface)
+                                .unwrap_or_else(|err| {
+                                    panic!("Failed to check surface support for device {i}: {err}")
+                                })
+                        }
+                }) else {
+                error!("Failed to get all required queue familiy indices for device {i}");
                 continue;
-            }
+            };
 
             let extension_props = unsafe { instance.enumerate_device_extension_properties(device) };
-            if extension_props.is_err() {
-                usable = false;
-                error!(
-                    "Failed to get extension properties for device {}: {}",
-                    i + 1,
-                    extension_props.unwrap_err()
-                );
-                continue;
-            }
-            let ext_props = extension_props.unwrap();
-            if ext_props.len() < 1 {
-                usable = false;
-                error!(
-                    "Ignoring device {} because it has no extensions when {} are required",
-                    i + 1,
-                    Self::get_required_device_exts().len()
-                );
-                continue;
-            }
+            let ext_props = match extension_props {
+                Ok(val) if val.len() >= Self::get_required_device_exts().len() => val,
+                Ok(val) => {
+                    error!(
+                        "Ignoring device {} because it has {} extension(s) when {} are required",
+                        i,
+                        val.len(),
+                        Self::get_required_device_exts().len()
+                    );
+                    continue;
+                }
+                Err(err) => {
+                    error!("Failed to get extension properties for device {i}: {err}");
+                    continue;
+                }
+            };
 
             let surface_caps = unsafe {
                 surface_loader.get_physical_device_surface_capabilities(device, *surface)
             };
-            if surface_caps.is_err() {
-                usable = false;
-                error!(
-                    "Failed to get surface capabilities for device {}: {}",
-                    i + 1,
-                    surface_caps.unwrap_err()
-                );
-                continue;
-            }
-            let surface_caps = surface_caps.unwrap();
+            let surface_caps = match surface_caps {
+                Ok(val) => val,
+                Err(err) => {
+                    error!("Failed to get surface capabilities for device {i}: {err}");
+                    continue;
+                }
+            };
 
             let fmts =
                 unsafe { surface_loader.get_physical_device_surface_formats(device, *surface) };
-            if fmts.is_err() {
-                usable = false;
-                error!(
-                    "Failed to get surface formats for device {}: {}",
-                    i + 1,
-                    fmts.unwrap_err()
-                );
-                continue;
-            }
-            let surface_fmts = fmts.unwrap();
-            if surface_fmts.len() < 1 {
-                usable = false;
-                error!(
-                    "Ignoring device {} because it has no surface formats",
-                    i + 1
-                );
-                continue;
-            }
+            let surface_fmts = match fmts {
+                Ok(val) if !val.is_empty() => val,
+                Ok(_) => {
+                    error!("Ignoring device {i} because it has no surface formats");
+                    continue;
+                }
+                Err(err) => {
+                    error!("Failed to get surface formats for device {i}: {err}");
+                    continue;
+                }
+            };
 
             let present_modes = unsafe {
                 surface_loader.get_physical_device_surface_present_modes(device, *surface)
             };
-            if present_modes.is_err() {
-                usable = false;
-                error!(
-                    "Failed to get present modes for device {}: {}",
-                    i + 1,
-                    present_modes.unwrap_err()
-                );
-                continue;
-            }
-            let present_modes = present_modes.unwrap();
-            if present_modes.len() < 1 {
-                usable = false;
-                error!("Ignoring device {} because it has no present modes", i + 1);
-                continue;
-            }
+            let present_modes = match present_modes {
+                Ok(val) if !val.is_empty() => val,
+                Ok(_) => {
+                    error!("Ignoring device {i} because it has no present modes");
+                    continue;
+                }
+                Err(err) => {
+                    error!("Failed to get present modes for device {i}: {err}");
+                    continue;
+                }
+            };
 
             let mem_props = unsafe { instance.get_physical_device_memory_properties(device) };
             let props = unsafe { instance.get_physical_device_properties(device) };
             gpus.push(GpuInfo {
-                device: device,
-                usable: usable,
-                mem_props: mem_props,
-                props: props,
-                surface_caps: surface_caps,
-                surface_fmts: surface_fmts,
-                present_modes: present_modes,
-                queue_family_props: queue_family_props,
-                graphics_family_idx: graphics_family_idx,
-                present_family_idx: present_family_idx,
+                device,
+                mem_props,
+                props,
+                surface_caps,
+                surface_fmts,
+                present_modes,
+                queue_family_props,
+                graphics_family_idx: family_idx,
+                present_family_idx: family_idx,
                 ext_props,
             });
 
@@ -386,13 +347,6 @@ impl State {
         );
         if usable_count < 1 {
             panic!("Could not find any usable Vulkan devices");
-        }
-
-        for mut i in 0..gpus.len() {
-            if !gpus[i].usable {
-                gpus.remove(i);
-                i -= 1;
-            }
         }
 
         let name = unsafe {
@@ -414,15 +368,15 @@ impl State {
     ) -> (ash::Device, vk::Queue, vk::Queue) {
         debug!("Creating logical device");
 
-        let queue_priority = 1.0f32;
+        let queue_priority: f32 = 1.0;
         let graphics_queue_info = vk::DeviceQueueCreateInfo {
-            queue_family_index: gpu.graphics_family_idx.unwrap(),
+            queue_family_index: gpu.graphics_family_idx,
             p_queue_priorities: ptr::addr_of!(queue_priority),
             queue_count: 1,
             ..Default::default()
         };
         let present_queue_info = vk::DeviceQueueCreateInfo {
-            queue_family_index: gpu.present_family_idx.unwrap(),
+            queue_family_index: gpu.present_family_idx,
             p_queue_priorities: ptr::addr_of!(queue_priority),
             queue_count: 1,
             ..Default::default()
@@ -464,9 +418,8 @@ impl State {
         };
 
         debug!("Retrieving queues");
-        let graphics_queue =
-            unsafe { device.get_device_queue(gpu.graphics_family_idx.unwrap(), 0) };
-        let present_queue = unsafe { device.get_device_queue(gpu.present_family_idx.unwrap(), 0) };
+        let graphics_queue = unsafe { device.get_device_queue(gpu.graphics_family_idx, 0) };
+        let present_queue = unsafe { device.get_device_queue(gpu.present_family_idx, 0) };
 
         (device, graphics_queue, present_queue)
     }
@@ -518,13 +471,13 @@ impl State {
         debug!("Vulkan initialization succeeded");
 
         Self {
-            entry: entry,
-            instance: instance,
-            device: device,
-            surface_loader: surface_loader,
-            surface: surface,
+            entry,
+            instance,
+            device,
+            surface_loader,
+            surface,
             gpu: gpu_idx,
-            gpus: gpus,
+            gpus,
         }
     }
 
