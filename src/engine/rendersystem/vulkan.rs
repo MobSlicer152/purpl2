@@ -188,7 +188,7 @@ impl State {
             ..Default::default()
         };
 
-        let create_info = vk::InstanceCreateInfo {
+        let mut create_info = vk::InstanceCreateInfo {
             p_application_info: ptr::addr_of!(app_info),
             enabled_extension_count: extensions.len() as u32,
             pp_enabled_extension_names: extensions_raw.as_ptr(),
@@ -201,8 +201,18 @@ impl State {
             ..Default::default()
         };
 
-        let instance = unsafe {
-            vulkan_check!(entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)))
+        let result = unsafe { entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) };
+        let instance = if let Err(err) = result {
+            if err == vk::Result::ERROR_LAYER_NOT_PRESENT {
+                debug!("Validation layers not available, retrying with them disabled");
+                create_info.enabled_layer_count = 0;
+                unsafe { vulkan_check!(entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS))) }
+            } else {
+                panic!("Vulkan call entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) failed: {}", err);
+                unsafe { entry.create_instance(&create_info, None).unwrap() } // unreachable, but required
+            }
+        } else {
+            result.unwrap()
         };
 
         debug!("Created Vulkan instance successfully");
