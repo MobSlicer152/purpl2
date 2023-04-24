@@ -201,20 +201,19 @@ impl State {
         };
 
         let result = unsafe { entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) };
-        let instance = if let Err(err) = result {
-            if err == vk::Result::ERROR_LAYER_NOT_PRESENT {
+        let instance = match result {
+            Ok(val) => val,
+            Err(err) if err == vk::Result::ERROR_LAYER_NOT_PRESENT => {
                 debug!("Validation layers not available, retrying with them disabled");
                 create_info.enabled_layer_count = 0;
                 unsafe {
                     vulkan_check!(entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)))
                 }
-            } else {
-                panic!("Vulkan call entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) failed: {err}");
             }
-        } else {
-            result.unwrap()
+            Err(err) => 
+                panic!("Vulkan call entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) failed: {err}")
         };
-
+        
         debug!("Created Vulkan instance successfully");
         instance
     }
@@ -369,7 +368,7 @@ impl State {
     ) -> (ash::Device, vk::Queue, vk::Queue) {
         debug!("Creating logical device");
 
-        let queue_priority = 1.0f32;
+        let queue_priority: f32 = 1.0;
         let graphics_queue_info = vk::DeviceQueueCreateInfo {
             queue_family_index: gpu.graphics_family_idx,
             p_queue_priorities: ptr::addr_of!(queue_priority),
