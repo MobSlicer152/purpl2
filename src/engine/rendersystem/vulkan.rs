@@ -75,6 +75,9 @@ struct GpuInfo {
 
     graphics_family_idx: u32,
     compute_family_idx: u32,
+
+    // Vague guess at how powerful the GPU is
+    performance_score: u32,
 }
 
 pub struct State {
@@ -88,7 +91,7 @@ pub struct State {
     gpu: usize,
     gpus: Vec<GpuInfo>,
     graphics_queue: vk::Queue,
-    present_queue: vk::Queue,
+    compute_queue: vk::Queue,
 
     fences: Vec<vk::Fence>,
     acquire_semaphores: Vec<vk::Semaphore>,
@@ -333,6 +336,27 @@ impl State {
 
             let mem_props = unsafe { instance.get_physical_device_memory_properties(device) };
             let props = unsafe { instance.get_physical_device_properties(device) };
+
+            let mut score = (mem_props.memory_heaps[0].size / 1_000) as u32 + 
+                (props.limits.max_viewport_dimensions[0] as u64 * props.limits.max_viewport_dimensions[1] as u64 / 1_000) as u32;
+            if [vk::PhysicalDeviceType::DISCRETE_GPU, vk::PhysicalDeviceType::VIRTUAL_GPU].contains(&props.device_type) {
+                score *= 10;
+            } else if props.device_type == vk::PhysicalDeviceType::INTEGRATED_GPU {
+                score *= 2;
+            }
+
+            let name = unsafe {
+                ffi::CStr::from_ptr(props.device_name.as_ptr())
+                    .to_str()
+                    .unwrap()
+            };
+
+            debug!("Device {i}:");
+            debug!("\tName: {name}");
+            debug!("\tScore: {score}");
+            debug!("\tType: {:#?}", props.device_type);
+            debug!("\tHandle: {:#?}", device);
+
             gpus.push(GpuInfo {
                 device,
                 mem_props,
@@ -342,6 +366,7 @@ impl State {
                 present_modes,
                 graphics_family_idx: graphics_family_idx,
                 compute_family_idx: compute_family_idx,
+                performance_score: score
             });
 
             usable_count += 1;
@@ -358,7 +383,7 @@ impl State {
 
         debug!("Sorting device(s)");
         gpus.sort_by_key(|gpu| {
-            ![vk::PhysicalDeviceType::DISCRETE_GPU, vk::PhysicalDeviceType::VIRTUAL_GPU].contains(&gpu.props.device_type)
+            -(gpu.performance_score as i32)
         });
 
         gpus
@@ -477,7 +502,7 @@ impl State {
     //    swapchain_extent: vk::Extent2D,
     //) -> (vk::SwapchainKHR, Vec<vk::Image>) {
     //}
-
+    
     pub fn init() -> Self {
         debug!("Vulkan initialization started");
 
@@ -493,7 +518,7 @@ impl State {
         );
         let gpus = Self::get_gpus(&instance, &surface_loader, &surface);
         let gpu = 0;
-        let (device, graphics_queue, present_queue) =
+        let (device, graphics_queue, compute_queue) =
             Self::create_device(&instance, &gpus[gpu]);
         let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(&device);
         let fences = Self::create_fences(&device);
@@ -517,7 +542,7 @@ impl State {
             gpu,
             gpus,
             graphics_queue,
-            present_queue,
+            compute_queue,
             acquire_semaphores,
             render_complete_semaphores,
             fences
@@ -576,8 +601,8 @@ impl State {
                     .unwrap()
             };
             debug!(
-                "Selected {:#?} device {}, {} [{:04x}:{:04x}]",
-                gpu.props.device_type, gpu_idx, name, gpu.props.vendor_id, gpu.props.device_id
+                "Selected {:#?} device {}, {} [{:04x}:{:04x}] with score {}",
+                gpu.props.device_type, gpu_idx, name, gpu.props.vendor_id, gpu.props.device_id, gpu.performance_score
             );
         }
 
