@@ -214,7 +214,7 @@ impl State {
                 panic!("Vulkan call entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) failed: {err}")
         };
         
-        debug!("Created Vulkan instance successfully");
+        debug!("Created Vulkan instance {:?} successfully", instance.handle());
         instance
     }
 
@@ -349,14 +349,19 @@ impl State {
             panic!("Could not find any usable Vulkan devices");
         }
 
+        debug!("Sorting device(s)");
+        gpus.sort_by_key(|gpu| {
+            ![vk::PhysicalDeviceType::DISCRETE_GPU, vk::PhysicalDeviceType::VIRTUAL_GPU].contains(&gpu.props.device_type)
+        });
+
         let name = unsafe {
             ffi::CStr::from_ptr(gpus[0].props.device_name.as_ptr())
                 .to_str()
                 .unwrap()
         };
         debug!(
-            "Selected device {} [{:04x}:{:04x}]",
-            name, gpus[0].props.vendor_id, gpus[0].props.device_id
+            "Selected {:#?} device {} [{:04x}:{:04x}]",
+            gpus[0].props.device_type, name, gpus[0].props.vendor_id, gpus[0].props.device_id
         );
 
         gpus
@@ -406,6 +411,7 @@ impl State {
             p_enabled_features: ptr::addr_of!(device_features),
             pp_enabled_extension_names: device_exts.as_ptr(),
             enabled_extension_count: device_exts.len() as u32,
+            p_next: ptr::addr_of!(device_13_features) as *const ffi::c_void,
             ..Default::default()
         };
 
