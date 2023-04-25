@@ -37,8 +37,6 @@ mod video_impl {
 }
 #[cfg(any(windows, xbox))]
 mod video_impl {
-    use std::sync::Arc;
-
     use crate::platform::win32::video;
     pub fn init() {
         unsafe { video::init() }

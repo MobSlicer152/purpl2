@@ -30,5 +30,6 @@ xcb = "1.2.0"
 ash = "0.37.2"
 
 [features]
-default = ["graphics_debug"]
+default = ["graphics_debug", "release_log"]
 graphics_debug = []
+release_log = []

@@ -1,7 +1,6 @@
 use ash::{extensions, vk};
 use log::{debug, error, log};
-use std::sync::{Arc, Mutex};
-use std::{alloc, cmp, ffi, mem, os, ptr};
+use std::{alloc, ffi, ptr};
 
 macro_rules! vulkan_check {
     ($call: expr) => {
@@ -10,9 +9,11 @@ macro_rules! vulkan_check {
 }
 
 extern "system" fn vulkan_alloc(
+    #[allow(unused_variables)]
     p_user_data: *mut ffi::c_void,
     size: usize,
     alignment: usize,
+    #[allow(unused_variables)]
     allocation_scope: vk::SystemAllocationScope,
 ) -> *mut ffi::c_void {
     unsafe {
@@ -21,10 +22,12 @@ extern "system" fn vulkan_alloc(
 }
 
 extern "system" fn vulkan_realloc(
+    #[allow(unused_variables)]
     p_user_data: *mut ffi::c_void,
     p_original: *mut ffi::c_void,
     size: usize,
     alignment: usize,
+    #[allow(unused_variables)]
     allocation_scope: vk::SystemAllocationScope,
 ) -> *mut ffi::c_void {
     unsafe {
@@ -36,7 +39,11 @@ extern "system" fn vulkan_realloc(
     }
 }
 
-extern "system" fn vulkan_dealloc(p_user_data: *mut ffi::c_void, p_memory: *mut ffi::c_void) {
+extern "system" fn vulkan_dealloc(
+    #[allow(unused_variables)]
+    p_user_data: *mut ffi::c_void,
+    p_memory: *mut ffi::c_void
+) {
     unsafe {
         alloc::dealloc(
             p_memory as *mut u8,
@@ -66,11 +73,8 @@ struct GpuInfo {
     surface_fmts: Vec<vk::SurfaceFormatKHR>,
     present_modes: Vec<vk::PresentModeKHR>,
 
-    queue_family_props: Vec<vk::QueueFamilyProperties>,
     graphics_family_idx: u32,
-    present_family_idx: u32,
-
-    ext_props: Vec<vk::ExtensionProperties>,
+    compute_family_idx: u32,
 }
 
 pub struct State {
@@ -83,12 +87,12 @@ pub struct State {
 
     gpu: usize,
     gpus: Vec<GpuInfo>,
-    //    graphics_queue: vk::Queue,
-    //    present_queue: vk::Queue,
+    graphics_queue: vk::Queue,
+    present_queue: vk::Queue,
 
-    //    fences: [vk::Fence; FRAME_COUNT],
-    //    acquire_semaphores: [vk::Semaphore; FRAME_COUNT],
-    //    render_complete_semaphores: [vk::Semaphore; FRAME_COUNT],
+    fences: Vec<vk::Fence>,
+    acquire_semaphores: Vec<vk::Semaphore>,
+    render_complete_semaphores: Vec<vk::Semaphore>,
 
     //    swapchain: vk::SwapchainKHR,
     //    swapchain_images: Vec<vk::Image>,
@@ -245,20 +249,25 @@ impl State {
                 continue;
             }
 
-            let Some((family_idx, _)) = queue_family_props
+            let Some((graphics_family_idx, _)) = queue_family_props
                 .iter()
                 .enumerate()
                 .map(|(i, props)| (i as u32, props))
                 .find(|(i, props)| {
                     props.queue_count >= 1
                         && props.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                        && unsafe {
-                            surface_loader
-                                .get_physical_device_surface_support(device, *i, *surface)
-                                .unwrap_or_else(|err| {
-                                    panic!("Failed to check surface support for device {i}: {err}")
-                                })
-                        }
+                }) else {
+                error!("Failed to get all required queue familiy indices for device {i}");
+                continue;
+            };
+
+            let Some((compute_family_idx, _)) = queue_family_props
+                .iter()
+                .enumerate()
+                .map(|(i, props)| (i as u32, props))
+                .find(|(i, props)| {
+                    props.queue_count >= 1
+                        && props.queue_flags.contains(vk::QueueFlags::COMPUTE)
                 }) else {
                 error!("Failed to get all required queue familiy indices for device {i}");
                 continue;
@@ -331,10 +340,8 @@ impl State {
                 surface_caps,
                 surface_fmts,
                 present_modes,
-                queue_family_props,
-                graphics_family_idx: family_idx,
-                present_family_idx: family_idx,
-                ext_props,
+                graphics_family_idx: graphics_family_idx,
+                compute_family_idx: compute_family_idx,
             });
 
             usable_count += 1;
@@ -354,16 +361,6 @@ impl State {
             ![vk::PhysicalDeviceType::DISCRETE_GPU, vk::PhysicalDeviceType::VIRTUAL_GPU].contains(&gpu.props.device_type)
         });
 
-        let name = unsafe {
-            ffi::CStr::from_ptr(gpus[0].props.device_name.as_ptr())
-                .to_str()
-                .unwrap()
-        };
-        debug!(
-            "Selected {:#?} device {} [{:04x}:{:04x}]",
-            gpus[0].props.device_type, name, gpus[0].props.vendor_id, gpus[0].props.device_id
-        );
-
         gpus
     }
 
@@ -381,12 +378,12 @@ impl State {
             ..Default::default()
         };
         let present_queue_info = vk::DeviceQueueCreateInfo {
-            queue_family_index: gpu.present_family_idx,
+            queue_family_index: gpu.compute_family_idx,
             p_queue_priorities: ptr::addr_of!(queue_priority),
             queue_count: 1,
             ..Default::default()
         };
-        let queue_create_infos = if gpu.graphics_family_idx != gpu.present_family_idx {
+        let queue_create_infos = if gpu.graphics_family_idx != gpu.compute_family_idx {
             vec![graphics_queue_info, present_queue_info]
         } else {
             vec![graphics_queue_info]
@@ -423,19 +420,54 @@ impl State {
             ))
         };
 
+        debug!("Created logical device {:#?} successfully", device.handle());
+
         debug!("Retrieving queues");
         let graphics_queue = unsafe { device.get_device_queue(gpu.graphics_family_idx, 0) };
-        let present_queue = unsafe { device.get_device_queue(gpu.present_family_idx, 0) };
+        let present_queue = unsafe { device.get_device_queue(gpu.compute_family_idx, 0) };
+        debug!("Got graphics queue {:#?} and present queue {:#?}", graphics_queue, present_queue);
 
         (device, graphics_queue, present_queue)
     }
 
-    //fn create_fences(device: ash::Device) -> [vk::Fence; FRAME_COUNT] {}
+    fn create_semaphores(
+        device: &ash::Device,
+    ) -> (Vec<vk::Semaphore>, Vec<vk::Semaphore>) {
+        debug!("Creating {} semaphores", FRAME_COUNT * 2);
+        
+        let semaphore_create_info = vk::SemaphoreCreateInfo {
+            ..Default::default()
+        };
+        let mut acquire_semaphores = Vec::new();
+        let mut complete_semaphores = Vec::new();
+        for _ in 0..FRAME_COUNT {
+            acquire_semaphores.push(unsafe {
+                vulkan_check!(device.create_semaphore(&semaphore_create_info, Some(&ALLOCATION_CALLBACKS)))
+            });
+            complete_semaphores.push(unsafe {
+                vulkan_check!(device.create_semaphore(&semaphore_create_info, Some(&ALLOCATION_CALLBACKS)))
+            });
+        }
 
-    //fn create_semaphores(
-    //    device: ash::Device,
-    //) -> ([vk::Semaphore; FRAME_COUNT], [vk::Semaphore; FRAME_COUNT]) {
-    //}
+        (acquire_semaphores, complete_semaphores)
+    }
+
+    fn create_fences(device: &ash::Device) -> Vec<vk::Fence> {
+        debug!("Creating {FRAME_COUNT} command fences");
+
+        let fence_create_info = vk::FenceCreateInfo {
+            flags: vk::FenceCreateFlags::SIGNALED,
+            ..Default::default()
+        };
+        let mut fences = Vec::new();
+        for _ in 0..FRAME_COUNT {
+            fences.push(unsafe {
+                vulkan_check!(device.create_fence(&fence_create_info, Some(&ALLOCATION_CALLBACKS)))
+            })
+        }
+
+        fences
+    }
 
     //fn choose_surface_format(gpu: GpuInfo) -> vk::SurfaceFormatKHR {}
 
@@ -460,11 +492,11 @@ impl State {
             Some(&ALLOCATION_CALLBACKS),
         );
         let gpus = Self::get_gpus(&instance, &surface_loader, &surface);
-        let gpu_idx = 0;
+        let gpu = 0;
         let (device, graphics_queue, present_queue) =
-            Self::create_device(&instance, &gpus[gpu_idx]);
-        //let fences = Self::create_fences(device);
-        //let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(device);
+            Self::create_device(&instance, &gpus[gpu]);
+        let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(&device);
+        let fences = Self::create_fences(&device);
         //let surface_format = Self::choose_surface_format(gpu);
         //let video_size = crate::platform::video::get_size();
         //let swapchain_extent = vk::Extent2D {
@@ -476,15 +508,23 @@ impl State {
 
         debug!("Vulkan initialization succeeded");
 
-        Self {
+        let mut _self = Self {
             entry,
             instance,
             device,
             surface_loader,
             surface,
-            gpu: gpu_idx,
+            gpu,
             gpus,
-        }
+            graphics_queue,
+            present_queue,
+            acquire_semaphores,
+            render_complete_semaphores,
+            fences
+        };
+        _self.set_gpu(_self.gpu);
+
+        _self
     }
 
     pub fn begin_cmds() {}
@@ -495,12 +535,29 @@ impl State {
         debug!("Vulkan shutdown started");
 
         unsafe {
-            debug!("Destroying logical device");
+            debug!("Destroying {FRAME_COUNT} fences");
+            self.fences.iter()
+                .all(|fence| {
+                    self.device.destroy_fence(*fence, Some(&ALLOCATION_CALLBACKS));
+                    true
+                });
+            debug!("Destroying {} semaphores", FRAME_COUNT * 2);
+            self.render_complete_semaphores.iter()
+                .all(|semaphore| {
+                    self.device.destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS));
+                    true
+                });
+            self.acquire_semaphores.iter()
+                .all(|semaphore| {
+                    self.device.destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS));
+                    true
+                });
+            debug!("Destroying logical device {:#?}", self.device.handle());
             self.device.destroy_device(Some(&ALLOCATION_CALLBACKS));
-            debug!("Destroying surface");
+            debug!("Destroying surface {:#?}", self.surface);
             self.surface_loader
                 .destroy_surface(self.surface, Some(&ALLOCATION_CALLBACKS));
-            debug!("Destroying instance");
+            debug!("Destroying instance {:#?}", self.instance.handle());
             self.instance.destroy_instance(Some(&ALLOCATION_CALLBACKS));
         }
 
@@ -512,24 +569,18 @@ impl State {
         if gpu_idx < self.gpus.len() {
             self.gpu = gpu_idx;
             let gpu = &self.gpus[self.gpu];
+
             let name = unsafe {
                 ffi::CStr::from_ptr(gpu.props.device_name.as_ptr())
                     .to_str()
                     .unwrap()
             };
             debug!(
-                "Selected device {} [{:04x}:{:04x}]",
-                name, gpu.props.vendor_id, gpu.props.device_id
+                "Selected {:#?} device {}, {} [{:04x}:{:04x}]",
+                gpu.props.device_type, gpu_idx, name, gpu.props.vendor_id, gpu.props.device_id
             );
         }
 
         old_idx
     }
-}
-
-static STATE: Mutex<Option<State>> = Mutex::new(None);
-macro_rules! get_state {
-    () => {
-        STATE.lock().unwrap().as_ref().unwrap()
-    };
 }

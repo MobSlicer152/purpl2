@@ -1,6 +1,12 @@
+use std::env;
+
 include!("src/game.rs");
 
 fn main() {
+    if let Ok(profile) = env::var("PROFILE") {
+        println!("cargo:rustc-cfg=build={:?}", profile);
+    }
+
     #[cfg(windows)]
     embed_resource::compile(
         "src/platform/win32/purpl.rc",

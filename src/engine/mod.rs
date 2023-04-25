@@ -5,6 +5,34 @@ use chrono::Local;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::info;
 use std::{fs, io};
+use std::sync::{Mutex};
+
+const FRAME_SMOOTHING: f64 = 0.9;
+
+#[derive(Default)]
+struct State {
+    start_time: i64,
+    last_time: i64,
+    runtime: i64,
+    fps: f64,
+    delta: i64
+}
+
+impl State {
+    pub fn update(&mut self) {
+        let now = chrono::Local::now().timestamp_millis();
+        self.delta = now - self.last_time;
+        self.runtime += self.delta;
+        self.fps = (self.fps * FRAME_SMOOTHING) + (self.delta as f64 * (1.0 - FRAME_SMOOTHING));
+    }
+}
+
+static STATE: Mutex<Option<State>> = Mutex::new(None);
+macro_rules! get_state {
+    () => {
+        STATE.lock().unwrap().as_mut().unwrap()
+    };
+}
 
 fn setup_logger() -> Result<(), fern::InitError> {
     let dt = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
@@ -16,7 +44,7 @@ fn setup_logger() -> Result<(), fern::InitError> {
         .debug(Color::BrightCyan)
         .trace(Color::Cyan);
 
-    fern::Dispatch::new()
+    let dispatch = fern::Dispatch::new()
         .format(move |out, message, record| {
             let dt = Local::now();
             out.finish(format_args!(
@@ -28,12 +56,19 @@ fn setup_logger() -> Result<(), fern::InitError> {
                 message
             ))
         })
-        .level(log::LevelFilter::Debug)
-        .chain(io::stdout())
         .chain(fern::log_file(
             DataDirs::logs() + crate::GAME_EXECUTABLE_NAME + "-" + &dt + ".log",
-        )?)
-        .apply()?;
+        )?);
+
+    #[cfg(build = "debug")]
+    let dispatch = dispatch.level(log::LevelFilter::Debug);
+    #[cfg(all(not(build = "debug"), feature = "release_log"))]
+    let dispatch = dispatch.level(log::LevelFilter::Info);
+    #[cfg(any(build = "debug", all(not(build = "debug"), feature = "release_log")))]
+    let dispatch = dispatch.chain(io::stdout());
+
+    dispatch.apply()?;
+
     Ok(())
 }
 
@@ -43,7 +78,7 @@ pub fn init() {
             panic!("Failed to create engine data directory {dir}")
         }
     }
-
+    
     if setup_logger().is_err() {
         panic!("Failed to set up logger");
     }
@@ -55,6 +90,17 @@ pub fn init() {
 }
 
 pub fn update() {
+    if !platform::video::focused() || platform::video::resized() {
+        return;
+    }
+
+    if STATE.lock().unwrap().is_some() {
+        get_state!().update();
+    } else {
+        *STATE.lock().unwrap() = Some(State {..Default::default()});
+        get_state!().start_time = chrono::Local::now().timestamp();
+    }
+
     rendersystem::begin_cmds();
 
     rendersystem::present();
