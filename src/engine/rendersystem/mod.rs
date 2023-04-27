@@ -11,7 +11,7 @@ pub struct Shader {
 
 pub struct RenderTexture {
     name: String,
-    //texture: Texture,
+    texture: crate::texture::Texture,
     //#[cfg(not(any(macos, ios)))]
     //handle: VulkanTexture,
 }
@@ -43,6 +43,11 @@ mod render_impl {
 }
 
 static STATE: Mutex<Option<render_impl::State>> = Mutex::new(None);
+macro_rules! get_state {
+    () => {
+        STATE.lock().unwrap().as_mut().unwrap()
+    };
+}
 
 pub fn init() {
     info!("Render system initialization started");
@@ -51,21 +56,21 @@ pub fn init() {
 }
 
 pub fn begin_cmds() {
-    //STATE.lock().unwrap().as_ref().unwrap().begin_cmds()
+    //get_state!().begin_cmds()
 }
 
 pub fn present() {
-    //STATE.lock().unwrap().as_ref().unwrap().present()
+    //get_state!().present()
 }
 
 pub fn shutdown() {
     info!("Render system shutdown started");
-    STATE.lock().unwrap().as_ref().unwrap().shutdown();
+    get_state!().shutdown();
     info!("Render system shutdown succeeded");
 }
 
 impl Renderable for Model {
     fn render() {
-        //        STATE.lock().unwrap().as_ref().unwrap().render_model()
+        //get_state!().render_model()
     }
 }

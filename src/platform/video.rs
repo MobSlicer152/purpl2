@@ -8,16 +8,16 @@ mod video_impl {
         *STATE.lock().unwrap() = Some(video::State::init())
     }
     pub fn update() -> bool {
-        STATE.lock().unwrap().as_mut().unwrap().update()
+        get_state!().update()
     }
     pub fn shutdown() {
-        STATE.lock().unwrap().as_mut().unwrap().shutdown()
+        get_state!().shutdown()
     }
     pub fn get_size() -> (u32, u32) {
         STATE.lock().unwrap().as_ref().unwrap().get_size()
     }
     pub fn resized() -> bool {
-        STATE.lock().unwrap().as_mut().unwrap().resized()
+        get_state!().resized()
     }
     pub fn focused() -> bool {
         STATE.lock().unwrap().as_ref().unwrap().focused()
@@ -27,14 +27,10 @@ mod video_impl {
         instance: &ash::Instance,
         alloc_callbacks: Option<&ash::vk::AllocationCallbacks>,
     ) -> ash::vk::SurfaceKHR {
-        STATE
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .create_vulkan_surface(entry, instance, alloc_callbacks)
+        get_state!().create_vulkan_surface(entry, instance, alloc_callbacks)
     }
 }
+
 #[cfg(any(windows, xbox))]
 mod video_impl {
     use crate::platform::win32::video;

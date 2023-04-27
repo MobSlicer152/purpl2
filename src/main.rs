@@ -20,6 +20,8 @@ mod platform;
 
 pub use game::*;
 
+pub use texture;
+
 use mimalloc::MiMalloc;
 
 #[global_allocator]
