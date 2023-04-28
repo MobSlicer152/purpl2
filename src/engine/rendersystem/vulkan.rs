@@ -498,30 +498,19 @@ impl State {
         fences
     }
 
-    fn create_allocator(instance: &ash::Instance, gpu: &GpuInfo, device: &ash::Device) -> Allocator {
-        debug!("Creating Vulkan allocator");
-        vulkan_check!(Allocator::new(&AllocatorCreateDesc {
-            instance: *instance,
-            device: *device,
-            physical_device: gpu.device,
-            debug_settings: Default::default(),
-            buffer_device_address: true
-        }))
-    }
-
     fn choose_surface_fmt(gpu: &GpuInfo) -> vk::SurfaceFormatKHR {
         debug!("Choosing surface format");
 
         if gpu.surface_fmts.len() == 1 && gpu.surface_fmts[0].format == vk::Format::UNDEFINED {
-            vk::SurfaceFormatKHR {
+            return vk::SurfaceFormatKHR {
                 format: vk::Format::B8G8R8A8_UNORM,
                 color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR
-            }
+            };
         }
 
-        for fmt in gpu.surface_fmts {
+        for &fmt in &gpu.surface_fmts {
             if fmt.format == vk::Format::B8G8R8A8_UNORM && fmt.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR {
-                fmt
+                return fmt;
             }
         }
 
@@ -531,13 +520,24 @@ impl State {
     fn choose_present_mode(gpu: &GpuInfo) -> vk::PresentModeKHR {
         debug!("Choosing presentation mode");
 
-        for mode in gpu.present_modes {
+        for &mode in &gpu.present_modes {
             if mode == vk::PresentModeKHR::MAILBOX {
-                mode
+                return mode;
             }
         }
 
         vk::PresentModeKHR::FIFO
+    }
+
+    fn create_allocator(instance: &ash::Instance, device: &ash::Device, physical_device: &vk::PhysicalDevice) -> Allocator {
+        debug!("Creating Vulkan allocator");
+        vulkan_check!(Allocator::new(&AllocatorCreateDesc {
+            instance: instance.clone(),
+            device: device.clone(),
+            physical_device: physical_device.clone(),
+            debug_settings: Default::default(),
+            buffer_device_address: true
+        }))
     }
 
     //fn create_swapchain(
@@ -566,7 +566,7 @@ impl State {
             Self::create_device(&instance, &gpus[gpu]);
         let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(&device);
         let fences = Self::create_fences(&device);
-        let allocator = Self::create_allocator(&instance, &gpus[gpu], &device);
+        let allocator = Self::create_allocator(&instance, &device, &gpus[gpu].device);
         let surface_fmt = Self::choose_surface_fmt(&gpus[gpu]);
         let present_mode = Self::choose_present_mode(&gpus[gpu]);
         //let video_size = crate::platform::video::get_size();
