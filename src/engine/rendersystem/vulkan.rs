@@ -1,4 +1,5 @@
 use ash::{extensions, vk};
+use gpu_allocator::vulkan::*;
 use log::{debug, error, log};
 use std::{alloc, ffi, ptr};
 
@@ -88,6 +89,8 @@ pub struct State {
     //swapchain_loader: extensions::khr::Swapchain,
     surface: vk::SurfaceKHR,
 
+    allocator: Allocator,
+
     gpu: usize,
     gpus: Vec<GpuInfo>,
     graphics_queue: vk::Queue,
@@ -99,7 +102,8 @@ pub struct State {
 
     //    swapchain: vk::SwapchainKHR,
     //    swapchain_images: Vec<vk::Image>,
-    //    surface_format: vk::SurfaceFormatKHR,
+    surface_fmt: vk::SurfaceFormatKHR,
+    present_mode: vk::PresentModeKHR,
     //    swapchain_extent: vk::Extent2D,
 }
 
@@ -494,7 +498,47 @@ impl State {
         fences
     }
 
-    //fn choose_surface_format(gpu: GpuInfo) -> vk::SurfaceFormatKHR {}
+    fn create_allocator(instance: &ash::Instance, gpu: &GpuInfo, device: &ash::Device) -> Allocator {
+        debug!("Creating Vulkan allocator");
+        vulkan_check!(Allocator::new(&AllocatorCreateDesc {
+            instance: *instance,
+            device: *device,
+            physical_device: gpu.device,
+            debug_settings: Default::default(),
+            buffer_device_address: true
+        }))
+    }
+
+    fn choose_surface_fmt(gpu: &GpuInfo) -> vk::SurfaceFormatKHR {
+        debug!("Choosing surface format");
+
+        if gpu.surface_fmts.len() == 1 && gpu.surface_fmts[0].format == vk::Format::UNDEFINED {
+            vk::SurfaceFormatKHR {
+                format: vk::Format::B8G8R8A8_UNORM,
+                color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR
+            }
+        }
+
+        for fmt in gpu.surface_fmts {
+            if fmt.format == vk::Format::B8G8R8A8_UNORM && fmt.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR {
+                fmt
+            }
+        }
+
+        gpu.surface_fmts[0]
+    }
+
+    fn choose_present_mode(gpu: &GpuInfo) -> vk::PresentModeKHR {
+        debug!("Choosing presentation mode");
+
+        for mode in gpu.present_modes {
+            if mode == vk::PresentModeKHR::MAILBOX {
+                mode
+            }
+        }
+
+        vk::PresentModeKHR::FIFO
+    }
 
     //fn create_swapchain(
     //    device: ash::Device,
@@ -522,7 +566,9 @@ impl State {
             Self::create_device(&instance, &gpus[gpu]);
         let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(&device);
         let fences = Self::create_fences(&device);
-        //let surface_format = Self::choose_surface_format(gpu);
+        let allocator = Self::create_allocator(&instance, &gpus[gpu], &device);
+        let surface_fmt = Self::choose_surface_fmt(&gpus[gpu]);
+        let present_mode = Self::choose_present_mode(&gpus[gpu]);
         //let video_size = crate::platform::video::get_size();
         //let swapchain_extent = vk::Extent2D {
         //    width: video_size.0,
@@ -545,7 +591,10 @@ impl State {
             compute_queue,
             acquire_semaphores,
             render_complete_semaphores,
-            fences
+            fences,
+            allocator,
+            surface_fmt,
+            present_mode
         };
         _self.set_gpu(_self.gpu);
 
