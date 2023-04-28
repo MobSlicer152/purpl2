@@ -104,7 +104,7 @@ pub struct State {
     //    swapchain_images: Vec<vk::Image>,
     surface_fmt: vk::SurfaceFormatKHR,
     present_mode: vk::PresentModeKHR,
-    //    swapchain_extent: vk::Extent2D,
+    swapchain_extent: vk::Extent2D,
 }
 
 impl State {
@@ -564,16 +564,16 @@ impl State {
         let gpu = 0;
         let (device, graphics_queue, compute_queue) =
             Self::create_device(&instance, &gpus[gpu]);
+        let allocator = Self::create_allocator(&instance, &device, &gpus[gpu].device);
         let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(&device);
         let fences = Self::create_fences(&device);
-        let allocator = Self::create_allocator(&instance, &device, &gpus[gpu].device);
         let surface_fmt = Self::choose_surface_fmt(&gpus[gpu]);
         let present_mode = Self::choose_present_mode(&gpus[gpu]);
-        //let video_size = crate::platform::video::get_size();
-        //let swapchain_extent = vk::Extent2D {
-        //    width: video_size.0,
-        //    height: video_size.1,
-        //};
+        let video_size = crate::platform::video::get_size();
+        let swapchain_extent = vk::Extent2D {
+            width: video_size.0,
+            height: video_size.1,
+        };
         //let (swapchain, swapchain_images) =
         //    Self::create_swapchain(device, surface_format, swapchain_extent);
 
@@ -594,7 +594,8 @@ impl State {
             fences,
             allocator,
             surface_fmt,
-            present_mode
+            present_mode,
+            swapchain_extent,
         };
         _self.set_gpu(_self.gpu);
 
@@ -626,6 +627,8 @@ impl State {
                     self.device.destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS));
                     true
                 });
+            debug!("Allocator leaks (if any):");
+            self.allocator.report_memory_leaks(log::Level::Debug);
             debug!("Destroying logical device {:#?}", self.device.handle());
             self.device.destroy_device(Some(&ALLOCATION_CALLBACKS));
             debug!("Destroying surface {:#?}", self.surface);
