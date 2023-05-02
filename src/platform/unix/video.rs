@@ -178,7 +178,7 @@ impl State {
         alloc_callbacks: Option<&vk::AllocationCallbacks>,
     ) -> vk::SurfaceKHR {
         unsafe {
-            extensions::khr::XcbSurface::new(&entry, &instance)
+            extensions::khr::XcbSurface::new(entry, instance)
                 .create_xcb_surface(
                     &vk::XcbSurfaceCreateInfoKHR {
                         connection: self.connection.get_raw_conn() as *mut ffi::c_void,

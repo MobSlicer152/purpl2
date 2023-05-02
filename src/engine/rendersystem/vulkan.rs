@@ -257,7 +257,7 @@ impl State {
             debug!("Getting information for device {i}");
             let queue_family_props =
                 unsafe { instance.get_physical_device_queue_family_properties(device) };
-            if queue_family_props.len() < 1 {
+            if queue_family_props.is_empty() {
                 error!("Ignoring GPU {i} because it has no queue families");
                 continue;
             }
@@ -278,7 +278,7 @@ impl State {
                 .iter()
                 .enumerate()
                 .map(|(i, props)| (i as u32, props))
-                .find(|(i, props)| {
+                .find(|(_, props)| {
                     props.queue_count >= 1
                         && props.queue_flags.contains(vk::QueueFlags::COMPUTE)
                 }) else {
@@ -374,8 +374,8 @@ impl State {
                 surface_caps,
                 surface_fmts,
                 present_modes,
-                graphics_family_idx: graphics_family_idx,
-                compute_family_idx: compute_family_idx,
+                graphics_family_idx,
+                compute_family_idx,
                 performance_score: score
             });
 
@@ -535,12 +535,12 @@ impl State {
         vk::PresentModeKHR::FIFO
     }
 
-    fn create_allocator(instance: &ash::Instance, device: &ash::Device, physical_device: &vk::PhysicalDevice) -> Allocator {
+    fn create_allocator(instance: &ash::Instance, device: &ash::Device, physical_device: vk::PhysicalDevice) -> Allocator {
         debug!("Creating Vulkan allocator");
         vulkan_check!(Allocator::new(&AllocatorCreateDesc {
             instance: instance.clone(),
             device: device.clone(),
-            physical_device: physical_device.clone(),
+            physical_device,
             debug_settings: Default::default(),
             buffer_device_address: true
         }))
@@ -592,9 +592,9 @@ impl State {
         
         debug!("Creating swap chain image views");
         let mut views = Vec::new();
-        for i in 0..FRAME_COUNT {
+        for &image in images.iter().take(FRAME_COUNT) {
             let view_info = vk::ImageViewCreateInfo {
-                image: images[i],
+                image,
 
                 view_type: vk::ImageViewType::TYPE_2D,
 
@@ -670,7 +670,7 @@ impl State {
         let gpu = 0;
         let (device, graphics_queue, compute_queue) =
             Self::create_device(&instance, &gpus[gpu]);
-        let allocator = Self::create_allocator(&instance, &device, &gpus[gpu].device);
+        let allocator = Self::create_allocator(&instance, &device, gpus[gpu].device);
         let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(&device);
         let fences = Self::create_fences(&device);
         let surface_fmt = Self::choose_surface_fmt(&gpus[gpu]);

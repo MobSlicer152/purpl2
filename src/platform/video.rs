@@ -1,23 +1,23 @@
-#[cfg(all(unix, not(any(macos, ios))))]
+#[cfg(all(unix, not(any(target_os = "macos", targeto_os = "ios"))))]
 mod video_impl {
     use crate::platform::unix::video;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
 
     static STATE: Mutex<Option<video::State>> = Mutex::new(None);
     pub fn init() {
         *STATE.lock().unwrap() = Some(video::State::init())
     }
     pub fn update() -> bool {
-        get_state!().update()
+        STATE.lock().unwrap().as_mut().unwrap().update()
     }
     pub fn shutdown() {
-        get_state!().shutdown()
+        STATE.lock().unwrap().as_mut().unwrap().shutdown()
     }
     pub fn get_size() -> (u32, u32) {
         STATE.lock().unwrap().as_ref().unwrap().get_size()
     }
     pub fn resized() -> bool {
-        get_state!().resized()
+        STATE.lock().unwrap().as_mut().unwrap().resized()
     }
     pub fn focused() -> bool {
         STATE.lock().unwrap().as_ref().unwrap().focused()
@@ -27,7 +27,12 @@ mod video_impl {
         instance: &ash::Instance,
         alloc_callbacks: Option<&ash::vk::AllocationCallbacks>,
     ) -> ash::vk::SurfaceKHR {
-        get_state!().create_vulkan_surface(entry, instance, alloc_callbacks)
+        STATE
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .create_vulkan_surface(entry, instance, alloc_callbacks)
     }
 }
 
