@@ -113,6 +113,7 @@ impl State {
         severity: vk::DebugUtilsMessageSeverityFlagsEXT,
         types: vk::DebugUtilsMessageTypeFlagsEXT,
         callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+        #[allow(unused_variables)]
         user_data: *mut ffi::c_void,
     ) -> u32 {
         let log_level = match severity {
@@ -230,10 +231,10 @@ impl State {
         instance
     }
 
-    fn get_required_device_exts() -> [&'static ffi::CStr; 2] {
+    fn get_required_device_exts() -> [&'static ffi::CStr; 1] {
         [
             // TODO: fix when vk-mem supports a version of ash with this extension
-            ffi::CStr::from_bytes_with_nul(b"VK_EXT_shader_object\0").unwrap(),
+            //ffi::CStr::from_bytes_with_nul(b"VK_EXT_shader_object\0").unwrap(),
             extensions::khr::Swapchain::name()
         ]
     }
@@ -265,7 +266,7 @@ impl State {
                 .iter()
                 .enumerate()
                 .map(|(i, props)| (i as u32, props))
-                .find(|(i, props)| {
+                .find(|(_, props)| {
                     props.queue_count >= 1
                         && props.queue_flags.contains(vk::QueueFlags::GRAPHICS)
                 }) else {
@@ -286,7 +287,7 @@ impl State {
             };
 
             let extension_props = unsafe { instance.enumerate_device_extension_properties(device) };
-            let ext_props = match extension_props {
+            match extension_props {
                 Ok(val) if val.len() >= Self::get_required_device_exts().len() => val,
                 Ok(val) => {
                     error!(
@@ -632,7 +633,7 @@ impl State {
         unsafe { self.swapchain_loader.destroy_swapchain(self.swapchain, Some(&ALLOCATION_CALLBACKS)) };
     }
     
-    fn create_descriptor_layout(device: &ash::Device) -> (vk::DescriptorSetLayout) {
+    fn create_descriptor_layout(device: &ash::Device) -> vk::DescriptorSetLayout {
         debug!("Creating descriptor set layout");
 
         let ubo_layout_binding = vk::DescriptorSetLayoutBinding {
