@@ -31,6 +31,7 @@ xcb = "1.2.0"
 
 [target.'cfg(not(any(macos, ios, xbox)))'.dependencies]
 ash = "0.37.2"
+vk-mem = { git = "https://github.com/gwihlidal/vk-mem-rs" }
 
 [features]
 default = ["graphics_debug", "release_log"]

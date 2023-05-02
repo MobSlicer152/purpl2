@@ -86,7 +86,7 @@ pub struct State {
     instance: ash::Instance,
     device: ash::Device,
     surface_loader: extensions::khr::Surface,
-    //swapchain_loader: extensions::khr::Swapchain,
+    swapchain_loader: extensions::khr::Swapchain,
     surface: vk::SurfaceKHR,
 
     allocator: Allocator,
@@ -100,8 +100,9 @@ pub struct State {
     acquire_semaphores: Vec<vk::Semaphore>,
     render_complete_semaphores: Vec<vk::Semaphore>,
 
-    //    swapchain: vk::SwapchainKHR,
-    //    swapchain_images: Vec<vk::Image>,
+    swapchain: vk::SwapchainKHR,
+    swapchain_images: Vec<vk::Image>,
+    swapchain_views: Vec<vk::ImageView>,
     surface_fmt: vk::SurfaceFormatKHR,
     present_mode: vk::PresentModeKHR,
     swapchain_extent: vk::Extent2D,
@@ -229,8 +230,12 @@ impl State {
         instance
     }
 
-    fn get_required_device_exts() -> [&'static ffi::CStr; 1] {
-        [extensions::khr::Swapchain::name()]
+    fn get_required_device_exts() -> [&'static ffi::CStr; 2] {
+        [
+            // TODO: fix when vk-mem supports a version of ash with this extension
+            ffi::CStr::from_bytes_with_nul(b"VK_EXT_shader_object\0").unwrap(),
+            extensions::khr::Swapchain::name()
+        ]
     }
 
     fn get_gpus(
@@ -540,13 +545,113 @@ impl State {
         }))
     }
 
-    //fn create_swapchain(
-    //    device: ash::Device,
-    //    surface_format: vk::SurfaceFormatKHR,
-    //    swapchain_extent: vk::Extent2D,
-    //) -> (vk::SwapchainKHR, Vec<vk::Image>) {
-    //}
+    fn create_swapchain(
+        device: &ash::Device,
+        gpu: &GpuInfo,
+        surface: &vk::SurfaceKHR,
+        present_mode: &vk::PresentModeKHR,
+        surface_format: &vk::SurfaceFormatKHR,
+        image_extent: &vk::Extent2D,
+        loader: &extensions::khr::Swapchain
+    ) -> (vk::SwapchainKHR, Vec<vk::Image>, Vec<vk::ImageView>) {
+        debug!("Creating swap chain");
+
+        let queue_family_indices = [gpu.graphics_family_idx, gpu.compute_family_idx];
+        let (image_sharing_mode, queue_family_index_count, p_queue_family_indices) = if gpu.graphics_family_idx != gpu.compute_family_idx {
+            (vk::SharingMode::CONCURRENT, 2, queue_family_indices.as_ptr())
+        } else {
+            (vk::SharingMode::EXCLUSIVE, 0, ptr::null())
+        };
+
+        let swapchain_info = vk::SwapchainCreateInfoKHR {
+            surface: *surface,
+            min_image_count: FRAME_COUNT as u32,
+            image_format: surface_format.format,
+            image_color_space: surface_format.color_space,
+            image_extent: *image_extent,
+            image_array_layers: 1,
+
+            image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
+
+            image_sharing_mode,
+            queue_family_index_count,
+            p_queue_family_indices,
+
+            pre_transform: vk::SurfaceTransformFlagsKHR::IDENTITY,
+            composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
+            present_mode: *present_mode,
+
+            clipped: vk::TRUE,
+
+            ..Default::default()
+        };
+
+        let swapchain = unsafe { vulkan_check!(loader.create_swapchain(&swapchain_info, Some(&ALLOCATION_CALLBACKS))) };
+        let images = unsafe { vulkan_check!(loader.get_swapchain_images(swapchain)) };
+        
+        debug!("Creating swap chain image views");
+        let mut views = Vec::new();
+        for i in 0..FRAME_COUNT {
+            let view_info = vk::ImageViewCreateInfo {
+                image: images[i],
+
+                view_type: vk::ImageViewType::TYPE_2D,
+
+                format: surface_format.format,
+
+                components: vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::R,
+                    g: vk::ComponentSwizzle::G,
+                    b: vk::ComponentSwizzle::B,
+                    a: vk::ComponentSwizzle::A,
+                },
+
+                subresource_range: vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1
+                },
+
+                ..Default::default()
+            };
+
+            views.push(unsafe { vulkan_check!(device.create_image_view(&view_info, Some(&ALLOCATION_CALLBACKS))) });
+        }
+
+        (swapchain, images, views)
+    }
+
+    fn destroy_swapchain(&self) {
+        debug!("Destroying {FRAME_COUNT} swap chain image views");
+        self.swapchain_views.iter()
+            .for_each(|view| unsafe { self.device.destroy_image_view(*view, Some(&ALLOCATION_CALLBACKS)) });
+
+        debug!("Destroying swap chain {:#?}", self.swapchain);
+        unsafe { self.swapchain_loader.destroy_swapchain(self.swapchain, Some(&ALLOCATION_CALLBACKS)) };
+    }
     
+    fn create_descriptor_layout(device: &ash::Device) -> (vk::DescriptorSetLayout) {
+        debug!("Creating descriptor set layout");
+
+        let ubo_layout_binding = vk::DescriptorSetLayoutBinding {
+            binding: 0,
+            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::VERTEX,
+            ..Default::default()
+        };
+
+        let descriptor_layout_info = vk::DescriptorSetLayoutCreateInfo {
+            p_bindings: ptr::addr_of!(ubo_layout_binding),
+            binding_count: 1,
+            ..Default::default()
+        };
+
+        unsafe { vulkan_check!(device.create_descriptor_set_layout(&descriptor_layout_info, Some(&ALLOCATION_CALLBACKS))) }
+    }
+
     pub fn init() -> Self {
         debug!("Vulkan initialization started");
 
@@ -574,8 +679,10 @@ impl State {
             width: video_size.0,
             height: video_size.1,
         };
-        //let (swapchain, swapchain_images) =
-        //    Self::create_swapchain(device, surface_format, swapchain_extent);
+        let swapchain_loader = extensions::khr::Swapchain::new(&instance, &device);
+        let (swapchain, swapchain_images, swapchain_views) =
+            Self::create_swapchain(&device, &gpus[gpu], &surface, &present_mode, &surface_fmt, &swapchain_extent, &swapchain_loader);
+        let descriptor_layout = Self::create_descriptor_layout(&device);
 
         debug!("Vulkan initialization succeeded");
 
@@ -584,6 +691,7 @@ impl State {
             instance,
             device,
             surface_loader,
+            swapchain_loader,
             surface,
             gpu,
             gpus,
@@ -593,6 +701,9 @@ impl State {
             render_complete_semaphores,
             fences,
             allocator,
+            swapchain,
+            swapchain_images,
+            swapchain_views,
             surface_fmt,
             present_mode,
             swapchain_extent,
@@ -610,23 +721,16 @@ impl State {
         debug!("Vulkan shutdown started");
 
         unsafe {
+            self.destroy_swapchain();
+
             debug!("Destroying {FRAME_COUNT} fences");
             self.fences.iter()
-                .all(|fence| {
-                    self.device.destroy_fence(*fence, Some(&ALLOCATION_CALLBACKS));
-                    true
-                });
+                .for_each(|fence| self.device.destroy_fence(*fence, Some(&ALLOCATION_CALLBACKS)));
             debug!("Destroying {} semaphores", FRAME_COUNT * 2);
             self.render_complete_semaphores.iter()
-                .all(|semaphore| {
-                    self.device.destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS));
-                    true
-                });
+                .for_each(|semaphore| self.device.destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS)));
             self.acquire_semaphores.iter()
-                .all(|semaphore| {
-                    self.device.destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS));
-                    true
-                });
+                .for_each(|semaphore| self.device.destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS)));
             debug!("Allocator leaks (if any):");
             self.allocator.report_memory_leaks(log::Level::Debug);
             debug!("Destroying logical device {:#?}", self.device.handle());
