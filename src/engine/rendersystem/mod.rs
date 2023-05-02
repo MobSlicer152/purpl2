@@ -34,11 +34,11 @@ pub struct Model {
     //handle: VulkanModel
 }
 
-#[cfg(not(any(macos, ios, xbox)))]
+#[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
 mod vulkan;
 
 mod render_impl {
-    #[cfg(not(any(macos, ios, xbox)))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
     pub use crate::engine::rendersystem::vulkan::*;
 }
 

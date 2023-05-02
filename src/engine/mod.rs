@@ -4,8 +4,8 @@ use crate::platform;
 use chrono::Local;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::info;
+use std::sync::Mutex;
 use std::{fs, io};
-use std::sync::{Mutex};
 
 const FRAME_SMOOTHING: f64 = 0.9;
 
@@ -15,15 +15,24 @@ struct State {
     last_time: i64,
     runtime: i64,
     fps: f64,
-    delta: i64
+    delta: i64,
 }
 
 impl State {
     pub fn update(&mut self) {
+        // TODO: fix. milis aren't precise enough, and this is called many times per milisecond
+        // As a result, almost always, delta = 0
+
         let now = chrono::Local::now().timestamp_millis();
         self.delta = now - self.last_time;
+        println!(
+            "{} - {} = {} ({})",
+            now, self.last_time, self.delta, self.fps
+        );
         self.runtime += self.delta;
         self.fps = (self.fps * FRAME_SMOOTHING) + (self.delta as f64 * (1.0 - FRAME_SMOOTHING));
+
+        self.last_time = now; // added because otherwise delta = timestamp, so runtime overflows quickly.
     }
 }
 
@@ -78,7 +87,7 @@ pub fn init() {
             panic!("Failed to create engine data directory {dir}")
         }
     }
-    
+
     if setup_logger().is_err() {
         panic!("Failed to set up logger");
     }
@@ -97,7 +106,9 @@ pub fn update() {
     if STATE.lock().unwrap().is_some() {
         get_state!().update();
     } else {
-        *STATE.lock().unwrap() = Some(State {..Default::default()});
+        *STATE.lock().unwrap() = Some(State {
+            ..Default::default()
+        });
         get_state!().start_time = chrono::Local::now().timestamp();
     }
 
