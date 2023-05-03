@@ -20,9 +20,6 @@ struct State {
 
 impl State {
     pub fn update(&mut self) {
-        // TODO: fix. milis aren't precise enough, and this is called many times per milisecond
-        // As a result, almost always, delta = 0
-
         let now = chrono::Local::now().timestamp_millis();
         self.delta = now - self.last_time;
         println!(
@@ -30,9 +27,13 @@ impl State {
             now, self.last_time, self.delta, self.fps
         );
         self.runtime += self.delta;
-        self.fps = (self.fps * FRAME_SMOOTHING) + (self.delta as f64 * (1.0 - FRAME_SMOOTHING));
+        self.fps = if self.delta > 0 {
+            (self.fps * FRAME_SMOOTHING) + ((1000.0 / self.delta as f64) * (1.0 - FRAME_SMOOTHING))
+        } else {
+            f64::INFINITY
+        };
 
-        self.last_time = now; // added because otherwise delta = timestamp, so runtime overflows quickly.
+        self.last_time = now;
     }
 }
 
@@ -113,6 +114,8 @@ pub fn update() {
     }
 
     rendersystem::begin_cmds();
+
+    std::thread::sleep(std::time::Duration::from_millis(8));
 
     rendersystem::present();
 }
