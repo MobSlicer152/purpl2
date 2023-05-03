@@ -1,0 +1,30 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.build-type }} build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        build-type: [dev, release]
+        os: [windows-latest, macOS-latest, ubuntu-latest]
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build
+      run: cargo build --${{ matrix.build-type }} --verbose --out-dir final
+      
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v3.1.2
+      with:
+        name: purpl-${{ matrix.build-type }}-${{ matrix.os }}
+        path: final
