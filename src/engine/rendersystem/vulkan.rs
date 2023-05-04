@@ -653,6 +653,23 @@ impl State {
         unsafe { vulkan_check!(device.create_descriptor_set_layout(&descriptor_layout_info, Some(&ALLOCATION_CALLBACKS))) }
     }
 
+    fn choose_format(instance: &ash::Instance, gpu: &GpuInfo, fmts: &Vec<vk::Format>, img_tiling: vk::ImageTiling, req_fmt_features: vk::FormatFeatureFlags) -> vk::Format {
+        debug!("Finding format with feature flags {:#?}", req_fmt_features);
+
+        for fmt in fmts {
+            let props = unsafe { instance.get_physical_device_format_properties(gpu.device, *fmt) };
+            match img_tiling {
+                vk::ImageTiling::LINEAR => {
+                    if props.linear_tiling_features & req_fmt_features == req_fmt_features {
+
+                    }
+                }
+                vk::ImageTiling::OPTIMAL => {}
+                _ => {}
+            }
+        }
+    }
+
     pub fn init() -> Self {
         debug!("Vulkan initialization started");
 
