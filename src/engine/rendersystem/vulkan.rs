@@ -11,10 +11,10 @@ macro_rules! vulkan_check {
 }
 
 extern "system" fn vulkan_alloc(
-    #[allow(unused_variables)] p_user_data: *mut ffi::c_void,
+    _p_user_data: *mut ffi::c_void,
     size: usize,
     alignment: usize,
-    #[allow(unused_variables)] allocation_scope: vk::SystemAllocationScope,
+    _allocation_scope: vk::SystemAllocationScope,
 ) -> *mut ffi::c_void {
     unsafe {
         alloc::alloc(alloc::Layout::from_size_align(size, alignment).unwrap()) as *mut ffi::c_void
@@ -22,11 +22,11 @@ extern "system" fn vulkan_alloc(
 }
 
 extern "system" fn vulkan_realloc(
-    #[allow(unused_variables)] p_user_data: *mut ffi::c_void,
+    _p_user_data: *mut ffi::c_void,
     p_original: *mut ffi::c_void,
     size: usize,
     alignment: usize,
-    #[allow(unused_variables)] allocation_scope: vk::SystemAllocationScope,
+    _allocation_scope: vk::SystemAllocationScope,
 ) -> *mut ffi::c_void {
     unsafe {
         alloc::realloc(
@@ -38,7 +38,7 @@ extern "system" fn vulkan_realloc(
 }
 
 extern "system" fn vulkan_dealloc(
-    #[allow(unused_variables)] p_user_data: *mut ffi::c_void,
+    _p_user_data: *mut ffi::c_void,
     p_memory: *mut ffi::c_void,
 ) {
     unsafe {
@@ -194,14 +194,62 @@ impl Buffer {
         Ok(Self { buf, alloc, size })
     }
 
+    pub fn copy(
+        &self,
+        device: &ash::Device,
+        queue: &vk::Queue,
+        transfer_pool: &vk::CommandPool,
+        fence: &vk::Fence,
+        dest: &Self,
+    ) {
+        let transfer_buf = unsafe {
+            vulkan_check!(
+                device.allocate_command_buffers(&vk::CommandBufferAllocateInfo {
+                    level: vk::CommandBufferLevel::PRIMARY,
+                    command_pool: transfer_pool.clone(),
+                    command_buffer_count: FRAME_COUNT as u32,
+                    ..Default::default()
+                })
+            )
+        }[0];
+
+        unsafe {
+            vulkan_check!(device.begin_command_buffer(
+                transfer_buf,
+                &vk::CommandBufferBeginInfo {
+                    flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+                    ..Default::default()
+                }
+            ));
+
+            device.cmd_copy_buffer(
+                transfer_buf,
+                self.buf,
+                dest.buf,
+                &[vk::BufferCopy {
+                    size: self.size,
+                    ..Default::default()
+                }],
+            );
+
+            vulkan_check!(device.end_command_buffer(transfer_buf));
+            vulkan_check!(device.queue_submit(
+                queue.clone(),
+                &[vk::SubmitInfo {
+                    command_buffer_count: 1,
+                    p_command_buffers: ptr::addr_of!(transfer_buf),
+                    ..Default::default()
+                }],
+                fence.clone()
+            ));
+            vulkan_check!(device.queue_wait_idle(queue.clone()));
+
+            device.free_command_buffers(transfer_pool.clone(), &[transfer_buf]);
+        }
+    }
+
     pub fn destroy(self, allocator: &vk_mem::Allocator) {
         unsafe { allocator.destroy_buffer(self.buf, self.alloc) };
-    }
-}
-
-impl Clone for Buffer {
-    fn clone(&self, transfer_pool: &vk::CommandPool) -> Self {
-        
     }
 }
 
@@ -234,6 +282,8 @@ pub struct State {
     surface_fmt: vk::SurfaceFormatKHR,
     present_mode: vk::PresentModeKHR,
     swapchain_extent: vk::Extent2D,
+
+    descriptor_layout: vk::DescriptorSetLayout,
 
     depth_img: Image,
 }
@@ -656,11 +706,35 @@ impl State {
             flags: main_pool_info.flags | vk::CommandPoolCreateFlags::TRANSIENT,
             ..main_pool_info
         };
-        
-        let main_pool = unsafe { vulkan_check!(device.create_command_pool(&main_pool_info, Some(&ALLOCATION_CALLBACKS))) };
-        let transfer_pool = unsafe { vulkan_check!(device.create_command_pool(&transfer_pool_info, Some(&ALLOCATION_CALLBACKS))) };
+
+        let main_pool = unsafe {
+            vulkan_check!(device.create_command_pool(&main_pool_info, Some(&ALLOCATION_CALLBACKS)))
+        };
+        let transfer_pool = unsafe {
+            vulkan_check!(
+                device.create_command_pool(&transfer_pool_info, Some(&ALLOCATION_CALLBACKS))
+            )
+        };
 
         (main_pool, transfer_pool)
+    }
+
+    fn allocate_cmd_bufs(
+        device: &ash::Device,
+        cmd_pool: &vk::CommandPool,
+    ) -> Vec<vk::CommandBuffer> {
+        debug!("Allocating command buffers");
+
+        unsafe {
+            vulkan_check!(
+                device.allocate_command_buffers(&vk::CommandBufferAllocateInfo {
+                    level: vk::CommandBufferLevel::PRIMARY,
+                    command_pool: cmd_pool.clone(),
+                    command_buffer_count: FRAME_COUNT as u32,
+                    ..Default::default()
+                })
+            )
+        }
     }
 
     fn create_allocator(
@@ -834,6 +908,10 @@ impl State {
         }
     }
 
+    fn create_descriptor_pool(device: &ash::Device) -> vk::DescriptorPool {
+
+    }
+
     fn create_render_targets(
         instance: &ash::Instance,
         gpu: &GpuInfo,
@@ -884,6 +962,7 @@ impl State {
                     level_count: 1,
                     base_array_layer: 0,
                     layer_count: 1,
+                    aspect_mask: vk::ImageAspectFlags::DEPTH,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -956,7 +1035,7 @@ impl State {
         let gpu = 0;
         let (device, graphics_queue, compute_queue) = Self::create_device(&instance, &gpus[gpu]);
         let (cmd_pool, transfer_cmd_pool) = Self::create_cmd_pools(&device, &gpus[gpu]);
-        let cmd_bufs = Self::create_cmd_bufs(&device, &cmd_pool);
+        let cmd_bufs = Self::allocate_cmd_bufs(&device, &cmd_pool);
         let allocator = Self::create_allocator(&instance, &device, gpus[gpu].device);
         let fences = Self::create_fences(&device);
         let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(&device);
@@ -1006,6 +1085,7 @@ impl State {
             surface_fmt,
             present_mode,
             swapchain_extent,
+            descriptor_layout,
             depth_img,
         };
         _self.set_gpu(_self.gpu);
@@ -1021,6 +1101,9 @@ impl State {
         debug!("Vulkan shutdown started");
 
         unsafe {
+            debug!("Destroying descriptor set layout {:#?}", self.descriptor_layout);
+            self.device.destroy_descriptor_set_layout(self.descriptor_layout, Some(&ALLOCATION_CALLBACKS));
+
             Self::destroy_render_targets(&self.device, &self.allocator, self.depth_img);
             Self::destroy_swapchain(
                 &self.device,
@@ -1028,12 +1111,6 @@ impl State {
                 self.swapchain,
                 self.swapchain_views,
             );
-
-            debug!("Destroying {FRAME_COUNT} fences");
-            self.fences.iter().for_each(|fence| {
-                self.device
-                    .destroy_fence(*fence, Some(&ALLOCATION_CALLBACKS))
-            });
             debug!("Destroying {} semaphores", FRAME_COUNT * 2);
             self.render_complete_semaphores
                 .iter()
@@ -1041,10 +1118,20 @@ impl State {
                     self.device
                         .destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS))
                 });
+
+            debug!("Destroying {FRAME_COUNT} fences");
+            self.fences.iter().for_each(|fence| {
+                self.device
+                    .destroy_fence(*fence, Some(&ALLOCATION_CALLBACKS))
+            });
             self.acquire_semaphores.iter().for_each(|semaphore| {
                 self.device
                     .destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS))
             });
+            debug!("Destroying transfer command pool {:#?}", self.transfer_cmd_pool);
+            self.device.destroy_command_pool(self.transfer_cmd_pool, Some(&ALLOCATION_CALLBACKS));
+            debug!("Destroying command pool {:#?}", self.cmd_pool);
+            self.device.destroy_command_pool(self.cmd_pool, Some(&ALLOCATION_CALLBACKS));
             debug!("Destroying logical device {:#?}", self.device.handle());
             self.device.destroy_device(Some(&ALLOCATION_CALLBACKS));
             debug!("Destroying surface {:#?}", self.surface);
