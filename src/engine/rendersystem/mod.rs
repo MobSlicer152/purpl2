@@ -56,16 +56,16 @@ pub fn init() {
 }
 
 pub fn begin_cmds() {
-    //get_state!().begin_cmds()
+    get_state!().begin_cmds()
 }
 
 pub fn present() {
-    //get_state!().present()
+    get_state!().present()
 }
 
 pub fn shutdown() {
     info!("Render system shutdown started");
-    get_state!().shutdown();
+    STATE.lock().unwrap().take().unwrap().shutdown();
     info!("Render system shutdown succeeded");
 }
 
