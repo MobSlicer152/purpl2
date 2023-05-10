@@ -1099,7 +1099,7 @@ impl State {
     fn create_descriptor_pool(device: &ash::Device) -> vk::DescriptorPool {
         debug!("Creating descriptor pool");
 
-        const pool_sizes: [vk::DescriptorPoolSize; 11] = [
+        const POOL_SIZES: [vk::DescriptorPoolSize; 11] = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::SAMPLER,
                 descriptor_count: 1000,
@@ -1150,9 +1150,9 @@ impl State {
             vulkan_check!(device.create_descriptor_pool(
                 &vk::DescriptorPoolCreateInfo {
                     flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
-                    pool_size_count: pool_sizes.len() as u32,
-                    p_pool_sizes: pool_sizes.as_ptr(),
-                    max_sets: 1000 * pool_sizes.len() as u32,
+                    pool_size_count: POOL_SIZES.len() as u32,
+                    p_pool_sizes: POOL_SIZES.as_ptr(),
+                    max_sets: 1000 * POOL_SIZES.len() as u32,
                     ..Default::default()
                 },
                 Some(&ALLOCATION_CALLBACKS)
@@ -1263,9 +1263,12 @@ impl State {
 
         unsafe {
             debug!("Freeing {FRAME_COUNT} uniform buffers");
-            for i in 0..self.uniform_buffers.len() {
-                self.uniform_buffers.remove(i).destroy(&self.allocator)
+            for _ in 0..self.uniform_buffers.len() {
+                self.uniform_buffers.remove(0).destroy(&self.allocator)
             }
+
+            debug!("Destroying descriptor pool {:#?}", self.descriptor_pool);
+            self.device.destroy_descriptor_pool(self.descriptor_pool, Some(&ALLOCATION_CALLBACKS));
 
             debug!(
                 "Destroying descriptor set layout {:#?}",

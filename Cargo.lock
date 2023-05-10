@@ -600,7 +600,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "purpl-rs"
+name = "purpl"
 version = "0.1.0"
 dependencies = [
  "ash",

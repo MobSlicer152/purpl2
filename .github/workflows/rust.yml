@@ -20,11 +20,16 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: Set up nightly Rust
+      run: |
+           rustup toolchain add nightly
+           rustup default nightly
+
     - name: Build
-      run: cargo build --profile ${{ matrix.build-type }} --verbose --out-dir final
+      run: cargo build --profile ${{ matrix.build-type }} --verbose --out-dir out -Z unstable-options
       
     - name: Upload build artifact
       uses: actions/upload-artifact@v3.1.2
       with:
         name: purpl-${{ matrix.build-type }}-${{ matrix.os }}
-        path: final
+        path: out
