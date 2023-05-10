@@ -1,4 +1,5 @@
 use log::info;
+use nalgebra::*;
 use std::sync::Mutex;
 
 pub struct Shader {
@@ -7,6 +8,12 @@ pub struct Shader {
     fragment_binary: Vec<u8>,
     //#[cfg(not(any(macos, ios)))]
     //handle: VulkanShader,
+}
+
+pub struct UniformData {
+    model: Matrix4<f64>,
+    view: Matrix4<f64>,
+    projection: Matrix4<f64>
 }
 
 pub struct RenderTexture {

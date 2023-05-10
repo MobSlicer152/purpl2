@@ -7,73 +7,73 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 const IDI_ICON1: u32 = 103;
 
-static mut WND: HWND = 0;
+static mut WINDOW: HWND = 0;
 
-const WND_CLASS_NAME: &str = "PurplWindow";
+const WINDOW_CLASS_NAME: &str = "PurplWindow";
 
-static mut WND_TITLE: String = String::new();
-static mut WND_WIDTH: u32 = 0;
-static mut WND_HEIGHT: u32 = 0;
+static mut WINDOW_TITLE: String = String::new();
+static mut WINDOW_WIDTH: u32 = 0;
+static mut WINDOW_HEIGHT: u32 = 0;
 
-static mut WND_RESIZED: bool = false;
-static mut WND_FOCUSED: bool = false;
-static mut WND_CLOSED: bool = false;
+static mut WINDOW_RESIZED: bool = false;
+static mut WINDOW_FOCUSED: bool = false;
+static mut WINDOW_CLOSED: bool = false;
 
-unsafe extern "system" fn wndproc(msg_wnd: HWND, msg: u32, wparam: usize, lparam: isize) -> isize {
-    if WND == 0 || msg_wnd == WND {
-        match msg {
+unsafe extern "system" fn wndproc(message_window: HWND, message: u32, wparam: usize, lparam: isize) -> isize {
+    if WINDOW == 0 || message_window == WINDOW {
+        match message {
             WM_SIZE => {
                 let mut client_area: RECT = mem::zeroed();
 
-                GetClientRect(msg_wnd, ptr::addr_of_mut!(client_area));
+                GetClientRect(message_window, ptr::addr_of_mut!(client_area));
                 let new_width = (client_area.right - client_area.left) as u32;
                 let new_height = (client_area.bottom - client_area.top) as u32;
 
-                if new_width != WND_WIDTH || new_height != WND_HEIGHT {
-                    WND_RESIZED = true;
+                if new_width != WINDOW_WIDTH || new_height != WINDOW_HEIGHT {
+                    WINDOW_RESIZED = true;
                     info!(
                         "Window resized from {}x{} to {}x{}",
-                        WND_WIDTH, WND_HEIGHT, new_width, new_height
+                        WINDOW_WIDTH, WINDOW_HEIGHT, new_width, new_height
                     );
                 }
 
-                WND_WIDTH = new_width;
-                WND_HEIGHT = new_height;
+                WINDOW_WIDTH = new_width;
+                WINDOW_HEIGHT = new_height;
                 0
             }
             WM_ACTIVATEAPP => {
-                WND_FOCUSED = wparam != 0;
+                WINDOW_FOCUSED = wparam != 0;
                 info!(
                     "Window {}",
-                    if WND_FOCUSED { "focused" } else { "unfocused" }
+                    if WINDOW_FOCUSED { "focused" } else { "unfocused" }
                 );
                 0
             }
             WM_CLOSE => {
                 info!("Window closed");
-                WND_CLOSED = true;
+                WINDOW_CLOSED = true;
                 0
             }
-            _ => DefWindowProcA(msg_wnd, msg, wparam, lparam),
+            _ => DefWindowProcA(message_window, message, wparam, lparam),
         }
     } else {
-        DefWindowProcA(msg_wnd, msg, wparam, lparam)
+        DefWindowProcA(message_window, message, wparam, lparam)
     }
 }
 
 unsafe fn register_wndclass() {
-    let mut wnd_class: WNDCLASSEXA = mem::zeroed();
+    let mut window_class: WNDCLASSEXA = mem::zeroed();
     let base_addr = GetModuleHandleA(ptr::null_mut());
 
     debug!("Registering window class");
 
-    wnd_class.cbSize = mem::size_of::<WNDCLASSEXA>() as u32;
-    wnd_class.lpfnWndProc = Some(wndproc);
-    wnd_class.hInstance = base_addr;
-    wnd_class.hCursor = LoadCursorA(0, IDC_ARROW as *const u8);
-    wnd_class.hIcon = LoadIconA(base_addr, IDI_ICON1 as *const u8);
-    wnd_class.lpszClassName = WND_CLASS_NAME.as_ptr();
-    if RegisterClassExA(ptr::addr_of_mut!(wnd_class)) == 0 {
+    window_class.cbSize = mem::size_of::<WNDCLASSEXA>() as u32;
+    window_class.lpfnWndProc = Some(wndproc);
+    window_class.hInstance = base_addr;
+    window_class.hCursor = LoadCursorA(0, IDC_ARROW as *const u8);
+    window_class.hIcon = LoadIconA(base_addr, IDI_ICON1 as *const u8);
+    window_class.lpszClassName = WINDOW_CLASS_NAME.as_ptr();
+    if RegisterClassExA(ptr::addr_of_mut!(window_class)) == 0 {
         let err = GetLastError();
         panic!(
             "Failed to register window class: error 0x{:X} ({})",
@@ -97,10 +97,10 @@ unsafe fn init_wnd() {
         WS_OVERLAPPEDWINDOW,
         false as i32,
     );
-    WND_WIDTH = (client_area.right - client_area.left) as u32;
-    WND_HEIGHT = (client_area.bottom - client_area.top) as u32;
+    WINDOW_WIDTH = (client_area.right - client_area.left) as u32;
+    WINDOW_HEIGHT = (client_area.bottom - client_area.top) as u32;
 
-    WND_TITLE = format!(
+    WINDOW_TITLE = format!(
         "{} v{}.{}.{} by {}",
         crate::GAME_NAME,
         crate::GAME_VERSION_MAJOR,
@@ -110,39 +110,39 @@ unsafe fn init_wnd() {
     );
     debug!(
         "Creating {}x{} window titled {}",
-        WND_WIDTH, WND_HEIGHT, WND_TITLE
+        WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE
     );
 
-    WND = CreateWindowExA(
+    WINDOW = CreateWindowExA(
         0,
-        WND_CLASS_NAME.as_ptr(),
-        WND_TITLE.as_ptr(),
+        WINDOW_CLASS_NAME.as_ptr(),
+        WINDOW_TITLE.as_ptr(),
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        WND_WIDTH as i32,
-        WND_HEIGHT as i32,
+        WINDOW_WIDTH as i32,
+        WINDOW_HEIGHT as i32,
         0,
         0,
         base_addr,
         ptr::null_mut(),
     );
-    if WND == 0 {
+    if WINDOW == 0 {
         let err = GetLastError();
         panic!("Failed to create window: error 0x{:X} {}", err, err);
     }
 
-    GetClientRect(WND, ptr::addr_of_mut!(client_area));
-    WND_WIDTH = (client_area.right - client_area.left) as u32;
-    WND_HEIGHT = (client_area.bottom - client_area.top) as u32;
+    GetClientRect(WINDOW, ptr::addr_of_mut!(client_area));
+    WINDOW_WIDTH = (client_area.right - client_area.left) as u32;
+    WINDOW_HEIGHT = (client_area.bottom - client_area.top) as u32;
 
-    WND_RESIZED = false;
-    WND_FOCUSED = true;
-    WND_CLOSED = false;
+    WINDOW_RESIZED = false;
+    WINDOW_FOCUSED = true;
+    WINDOW_CLOSED = false;
 
     debug!(
         "Successfully created window with handle 0x{:X}",
-        WND as usize
+        WINDOW as usize
     );
 }
 
@@ -153,7 +153,7 @@ pub unsafe fn init() {
     init_wnd();
 
     debug!("Showing window");
-    ShowWindow(WND, SW_SHOW);
+    ShowWindow(WINDOW, SW_SHOW);
 
     info!("Windows video initialization succeeded");
 }
@@ -166,30 +166,30 @@ pub unsafe fn update() -> bool {
         DispatchMessageA(ptr::addr_of_mut!(msg));
     }
 
-    !WND_CLOSED
+    !WINDOW_CLOSED
 }
 
 pub unsafe fn shutdown() {
     info!("Windows video shutdown started");
 
     debug!("Destroying window");
-    DestroyWindow(WND);
+    DestroyWindow(WINDOW);
 
     info!("Windows video shutdown succeeded");
 }
 
 pub unsafe fn get_size() -> (u32, u32) {
-    (WND_WIDTH, WND_HEIGHT)
+    (WINDOW_WIDTH, WINDOW_HEIGHT)
 }
 
 pub unsafe fn resized() -> bool {
-    let ret = WND_RESIZED;
-    WND_RESIZED = false;
+    let ret = WINDOW_RESIZED;
+    WINDOW_RESIZED = false;
     ret
 }
 
 pub unsafe fn focused() -> bool {
-    WND_FOCUSED
+    WINDOW_FOCUSED
 }
 
 #[cfg(not(xbox))]
@@ -203,7 +203,7 @@ pub fn create_vulkan_surface(
             .create_win32_surface(
                 &vk::Win32SurfaceCreateInfoKHR {
                     hinstance: GetModuleHandleA(ptr::null_mut()) as *const ffi::c_void,
-                    hwnd: WND as *const ffi::c_void,
+                    hwnd: WINDOW as *const ffi::c_void,
                     ..Default::default()
                 },
                 alloc_callbacks,

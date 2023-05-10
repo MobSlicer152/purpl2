@@ -17,6 +17,7 @@ directories = "5.0.0"
 fern = { version = "0.6.2", features = ["colored"] }
 log = "0.4"
 mimalloc = "0.1.36"
+nalgebra = "0.32.2"
 once_cell = "1.17.1"
 
 # Local crates
