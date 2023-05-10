@@ -1175,6 +1175,26 @@ impl State {
         buffers
     }
 
+    fn allocate_descriptor_sets(device: &ash::Device, layout: &vk::DescriptorSetLayout, pool: &vk::DescriptorPool, uniform_buffers: &Vec<HostBuffer>) -> Vec<vk::DescriptorSet {
+        debug!("Allocating {FRAME_COUNT} descriptor sets");
+
+        let mut layouts = Vec::new();
+        layouts.resize_with(3, || {layout});
+
+        let descriptor_sets = unsafe {
+            vulkan_check!(
+                device.allocate_descriptor_sets(
+                    &vk::DescriptorSetAllocateInfo {
+                        descriptor_pool: pool,
+                        descriptor_set_count: FRAME_COUNT,
+                        p_set_layouts: layouts.as_slice(),
+                        ..Default::default()
+                    }
+                )
+            )
+        };
+    }
+
     pub fn init() -> Self {
         debug!("Vulkan initialization started");
 
