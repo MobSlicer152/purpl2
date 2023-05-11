@@ -1585,6 +1585,8 @@ impl State {
             debug!("Destroying command pool {:#?}", self.command_pool);
             self.device
                 .destroy_command_pool(self.command_pool, Some(&ALLOCATION_CALLBACKS));
+            debug!("Destroying allocator");
+            ptr::drop_in_place(ptr::addr_of_mut!(self.allocator));
             debug!("Destroying logical device {:#?}", self.device.handle());
             self.device.destroy_device(Some(&ALLOCATION_CALLBACKS));
             debug!("Destroying surface {:#?}", self.surface);

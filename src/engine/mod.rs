@@ -22,10 +22,6 @@ impl State {
     pub fn update(&mut self) {
         let now = chrono::Local::now().timestamp_millis();
         self.delta = now - self.last_time;
-        println!(
-            "{} - {} = {} ({})",
-            now, self.last_time, self.delta, self.fps
-        );
         self.runtime += self.delta;
         self.fps = if self.delta > 0 {
             (self.fps * FRAME_SMOOTHING) + ((1000.0 / self.delta as f64) * (1.0 - FRAME_SMOOTHING))
@@ -114,8 +110,6 @@ pub fn update() {
     }
 
     rendersystem::begin_cmds();
-
-    std::thread::sleep(std::time::Duration::from_millis(8));
 
     rendersystem::present();
 }
