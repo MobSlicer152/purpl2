@@ -1,27 +1,43 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 const TEXTURE_VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize)]
-pub struct DepthPixel { depth: f32 }
+pub struct DepthPixel {
+    depth: f32,
+}
 #[derive(Serialize, Deserialize)]
-pub struct RgbPixel { r: u8, g: u8, b: u8 }
+pub struct RgbPixel {
+    r: u8,
+    g: u8,
+    b: u8,
+}
 #[derive(Serialize, Deserialize)]
-pub struct RgbaPixel { r: u8, g: u8, b: u8, a: u8 }
+pub struct RgbaPixel {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+}
 
 #[derive(Serialize, Deserialize)]
 pub enum Pixel {
     Depth(DepthPixel),
     Rgb(RgbPixel),
-    Rgba(RgbaPixel)
+    Rgba(RgbaPixel),
 }
 
 pub mod pixel_format {
-    use crate::{Pixel, DepthPixel, RgbPixel, RgbaPixel};
+    use crate::{DepthPixel, Pixel, RgbPixel, RgbaPixel};
 
     const DEPTH: Pixel = Pixel::Depth(DepthPixel { depth: 0.0 });
     const RGB: Pixel = Pixel::Rgb(RgbPixel { r: 0, g: 0, b: 0 });
-    const RGBA: Pixel = Pixel::Rgba(RgbaPixel { r: 0, g: 0, b: 0, a: 0 });
+    const RGBA: Pixel = Pixel::Rgba(RgbaPixel {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    });
 }
 
 impl From<DepthPixel> for Pixel {
@@ -48,14 +64,18 @@ pub struct Texture {
     format: Pixel,
     width: u32,
     height: u32,
-    data: Vec<u8>
+    data: Vec<u8>,
 }
 
 impl Texture {
     pub fn new(format: Pixel, width: u32, height: u32, pixels: Vec<Pixel>) -> Self {
         let mut raw_pixels = Vec::new();
         for pixel in pixels {
-            let mut tmp = zstd::bulk::compress(&mut postcard::to_allocvec_cobs(&pixel).unwrap(), zstd::DEFAULT_COMPRESSION_LEVEL).unwrap();
+            let mut tmp = zstd::bulk::compress(
+                &mut postcard::to_allocvec_cobs(&pixel).unwrap(),
+                zstd::DEFAULT_COMPRESSION_LEVEL,
+            )
+            .unwrap();
             raw_pixels.append(&mut tmp);
         }
 
@@ -64,7 +84,7 @@ impl Texture {
             format,
             width,
             height,
-            data: raw_pixels
+            data: raw_pixels,
         }
     }
 }

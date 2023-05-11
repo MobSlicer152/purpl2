@@ -1,6 +1,6 @@
 use crate::{engine::rendersystem, platform};
 use ash::{extensions, vk};
-use log::{debug, error, log};
+use log::{debug, error, log, trace};
 use std::rc::Rc;
 use std::{alloc, ffi, mem, ptr, sync::Arc};
 use vk_mem::*;
@@ -630,7 +630,8 @@ impl State {
                 }
             };
 
-            let memory_properties = unsafe { instance.get_physical_device_memory_properties(device) };
+            let memory_properties =
+                unsafe { instance.get_physical_device_memory_properties(device) };
             let properties = unsafe { instance.get_physical_device_properties(device) };
 
             let mut score = (memory_properties.memory_heaps[0].size / 1_000) as u32
@@ -654,19 +655,20 @@ impl State {
                     .unwrap()
             };
 
-            let mut properties2 = unsafe { mem::zeroed::<vk::PhysicalDeviceProperties2>() };
+            // Doesn't work on my systems, but it should
+            let mut properties2 = vk::PhysicalDeviceProperties2::default();
             unsafe { instance.get_physical_device_properties2(device, &mut properties2) };
             let mut p_next = properties2.p_next;
             let mut driver_info_ptr = ptr::null();
             while !p_next.is_null() {
-                let type_ = unsafe { *(p_next as *mut vk::StructureType) };
-                if type_ == vk::StructureType::PHYSICAL_DEVICE_DRIVER_PROPERTIES {
+                let tagged = unsafe { (*(p_next as *mut vk::BaseOutStructure)) };
+                if tagged.s_type == vk::StructureType::PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR {
                     driver_info_ptr = p_next;
                     break;
                 }
 
-                p_next = unsafe { (*(p_next as *mut vk::BaseOutStructure)).p_next as *mut ffi::c_void };
-            };
+                p_next = tagged.p_next as *mut ffi::c_void;
+            }
 
             let driver_info = if !driver_info_ptr.is_null() {
                 unsafe { *(driver_info_ptr as *mut vk::PhysicalDeviceDriverProperties) }
@@ -676,7 +678,7 @@ impl State {
 
             debug!("Device {i}:");
             debug!("\tName: {name}");
-            debug!("\tDriver information: {driver_info:#?}");
+            trace!("\tDriver information:\n{driver_info:#?}");
             debug!("\tScore: {score}");
             debug!("\tType: {:#?}", properties.device_type);
             debug!("\tHandle: {device:#?}");
@@ -824,7 +826,10 @@ impl State {
         (acquire_semaphores, complete_semaphores)
     }
 
-    fn create_command_pools(device: &ash::Device, gpu: &GpuInfo) -> (vk::CommandPool, vk::CommandPool) {
+    fn create_command_pools(
+        device: &ash::Device,
+        gpu: &GpuInfo,
+    ) -> (vk::CommandPool, vk::CommandPool) {
         debug!("Creating command pools");
 
         let main_pool_info = vk::CommandPoolCreateInfo {
@@ -848,7 +853,9 @@ impl State {
             ))
         };
 
-        debug!("Created main command pool {main_pool:#?} and transfer command pool {transfer_pool:#?}");
+        debug!(
+            "Created main command pool {main_pool:#?} and transfer command pool {transfer_pool:#?}"
+        );
 
         (main_pool, transfer_pool)
     }
@@ -903,7 +910,7 @@ impl State {
                 return format;
             }
         }
-        
+
         debug!("Chose format {:#?}", gpu.surface_formats[0]);
         gpu.surface_formats[0]
     }

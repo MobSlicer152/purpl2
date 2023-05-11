@@ -19,7 +19,12 @@ static mut WINDOW_RESIZED: bool = false;
 static mut WINDOW_FOCUSED: bool = false;
 static mut WINDOW_CLOSED: bool = false;
 
-unsafe extern "system" fn wndproc(message_window: HWND, message: u32, wparam: usize, lparam: isize) -> isize {
+unsafe extern "system" fn wndproc(
+    message_window: HWND,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
     if WINDOW == 0 || message_window == WINDOW {
         match message {
             WM_SIZE => {
@@ -45,7 +50,11 @@ unsafe extern "system" fn wndproc(message_window: HWND, message: u32, wparam: us
                 WINDOW_FOCUSED = wparam != 0;
                 info!(
                     "Window {}",
-                    if WINDOW_FOCUSED { "focused" } else { "unfocused" }
+                    if WINDOW_FOCUSED {
+                        "focused"
+                    } else {
+                        "unfocused"
+                    }
                 );
                 0
             }

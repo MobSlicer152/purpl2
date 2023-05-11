@@ -14,14 +14,14 @@ pub struct Shader {
     name: String,
     vertex_binary: Vec<u8>,
     fragment_binary: Vec<u8>,
-    handle: render_impl::ShaderData
+    handle: render_impl::ShaderData,
 }
 
 #[repr(C)]
 pub struct UniformData {
     model: Matrix4<f64>,
     view: Matrix4<f64>,
-    projection: Matrix4<f64>
+    projection: Matrix4<f64>,
 }
 
 pub struct RenderTexture {
