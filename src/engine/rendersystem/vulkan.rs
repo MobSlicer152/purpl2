@@ -1,4 +1,4 @@
-use crate::engine::rendersystem;
+use crate::{engine::rendersystem, platform};
 use ash::{extensions, vk};
 use log::{debug, error, log};
 use std::rc::Rc;
@@ -1085,6 +1085,8 @@ impl State {
 
         self.destroy_render_targets();
         self.destroy_swapchain();
+        let (width, height) = platform::video::get_size();
+        self.swapchain_extent = vk::Extent2D { width, height };
         (self.swapchain, self.swapchain_images, self.swapchain_views) = Self::create_swapchain(
             &self.device,
             &self.gpus[self.gpu],
@@ -1338,22 +1340,20 @@ impl State {
             ))
         };
 
-        let (index, resized) = unsafe {
+        (self.swapchain_index, self.resized) = unsafe {
             match self.swapchain_loader.acquire_next_image(
                 self.swapchain,
                 u64::MAX,
                 self.acquire_semaphores[self.frame_index],
                 vk::Fence::null(),
             ) {
-                Ok(values) => values,
+                Ok(values) => (values.0 as usize, values.1),
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => (0, true),
                 Err(err) => {
                     panic!("Failed to acquire next image: {err}");
                 }
             }
         };
-        self.swapchain_index = index as usize;
-        self.resized = resized;
         if self.resized {
             self.resize();
             return;
