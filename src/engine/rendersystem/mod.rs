@@ -10,6 +10,7 @@ pub struct Shader {
     //handle: VulkanShader,
 }
 
+#[repr(C)]
 pub struct UniformData {
     model: Matrix4<f64>,
     view: Matrix4<f64>,

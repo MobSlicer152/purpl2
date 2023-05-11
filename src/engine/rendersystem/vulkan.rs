@@ -1,7 +1,8 @@
+use crate::engine::rendersystem;
 use ash::{extensions, vk};
 use log::{debug, error, log};
 use std::rc::Rc;
-use std::{alloc, ffi, mem, ptr};
+use std::{alloc, ffi, mem, ptr, sync::Arc};
 use vk_mem::*;
 
 macro_rules! vulkan_check {
@@ -76,7 +77,7 @@ struct GpuInfo {
 
 struct Image {
     handle: vk::Image,
-    allocation: vk_mem::Allocation,
+    allocation: Option<vk_mem::Allocation>,
     view: vk::ImageView,
     format: vk::Format,
 }
@@ -108,16 +109,16 @@ impl Image {
 
         Ok(Self {
             handle,
-            allocation,
+            allocation: Some(allocation),
             view,
             format,
         })
     }
 
-    pub fn destroy(self, device: &ash::Device, allocator: &vk_mem::Allocator) {
+    pub fn destroy(&mut self, device: &ash::Device, allocator: &vk_mem::Allocator) {
         unsafe {
             device.destroy_image_view(self.view, Some(&ALLOCATION_CALLBACKS));
-            allocator.destroy_image(self.handle, self.allocation);
+            allocator.destroy_image(self.handle, self.allocation.take().unwrap());
         }
     }
 
@@ -158,11 +159,11 @@ impl Image {
         &self.handle
     }
 
-    pub fn allocation(&self) -> &vk_mem::Allocation {
+    pub fn allocation(&self) -> &Option<vk_mem::Allocation> {
         &self.allocation
     }
 
-    pub fn allocation_mut(&mut self) -> &mut vk_mem::Allocation {
+    pub fn allocation_mut(&mut self) -> &mut Option<vk_mem::Allocation> {
         &mut self.allocation
     }
 
@@ -306,26 +307,37 @@ impl HostBuffer {
             allocator,
             match Buffer::new(allocator, size, usage, flags) {
                 Ok(buffer) => buffer,
-                Err(err) => return Err(err)
+                Err(err) => return Err(err),
             },
         )
     }
 
     pub fn from_buffer(allocator: &vk_mem::Allocator, buffer: Buffer) -> Result<Self, vk::Result> {
-        let mut self_ =  Self {
-            buffer,
-            address: 0
-        };
-        self_.address = unsafe { match allocator.map_memory(&mut self_.buffer.allocation) {
+        let mut self_ = Self { buffer, address: 0 };
+        self_.address = unsafe {
+            match allocator.map_memory(&mut self_.buffer.allocation) {
                 Ok(address) => address as u64,
-                Err(err) => return Err(err)
-        } };
+                Err(err) => return Err(err),
+            }
+        };
         Ok(self_)
     }
 
     pub fn destroy(mut self, allocator: &vk_mem::Allocator) {
         unsafe { allocator.unmap_memory(&mut self.buffer.allocation) };
         self.buffer.destroy(allocator);
+    }
+
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
+    pub fn buffer_mut(&mut self) -> &mut Buffer {
+        &mut self.buffer
+    }
+
+    pub fn address(&self) -> u64 {
+        self.address
     }
 }
 
@@ -355,6 +367,7 @@ pub struct State {
     swapchain: vk::SwapchainKHR,
     swapchain_images: Vec<vk::Image>,
     swapchain_views: Vec<vk::ImageView>,
+    swapchain_index: usize,
     surface_format: vk::SurfaceFormatKHR,
     present_mode: vk::PresentModeKHR,
     swapchain_extent: vk::Extent2D,
@@ -363,8 +376,15 @@ pub struct State {
 
     descriptor_layout: vk::DescriptorSetLayout,
     descriptor_pool: vk::DescriptorPool,
+    descriptor_sets: Vec<vk::DescriptorSet>,
 
     uniform_buffers: Vec<HostBuffer>,
+
+    frame_index: usize,
+    resized: bool,
+
+    last_shader: Option<Arc<rendersystem::Shader>>,
+    last_model: Option<Arc<rendersystem::Model>>,
 }
 
 impl State {
@@ -759,18 +779,16 @@ impl State {
         };
         let mut acquire_semaphores = Vec::new();
         let mut complete_semaphores = Vec::new();
-        for _ in 0..FRAME_COUNT {
-            acquire_semaphores.push(unsafe {
-                vulkan_check!(
-                    device.create_semaphore(&semaphore_create_info, Some(&ALLOCATION_CALLBACKS))
-                )
-            });
-            complete_semaphores.push(unsafe {
-                vulkan_check!(
-                    device.create_semaphore(&semaphore_create_info, Some(&ALLOCATION_CALLBACKS))
-                )
-            });
-        }
+        acquire_semaphores.resize_with(3, || unsafe {
+            vulkan_check!(
+                device.create_semaphore(&semaphore_create_info, Some(&ALLOCATION_CALLBACKS))
+            )
+        });
+        complete_semaphores.resize_with(3, || unsafe {
+            vulkan_check!(
+                device.create_semaphore(&semaphore_create_info, Some(&ALLOCATION_CALLBACKS))
+            )
+        });
 
         (acquire_semaphores, complete_semaphores)
     }
@@ -952,19 +970,18 @@ impl State {
         (swapchain, images, views)
     }
 
-    fn destroy_swapchain(
-        device: &ash::Device,
-        loader: &extensions::khr::Swapchain,
-        swapchain: vk::SwapchainKHR,
-        swapchain_views: Vec<vk::ImageView>,
-    ) {
+    fn destroy_swapchain(&mut self) {
         debug!("Destroying {FRAME_COUNT} swap chain image views");
-        swapchain_views.iter().for_each(|view| unsafe {
-            device.destroy_image_view(*view, Some(&ALLOCATION_CALLBACKS))
+        self.swapchain_views.iter().for_each(|view| unsafe {
+            self.device
+                .destroy_image_view(*view, Some(&ALLOCATION_CALLBACKS))
         });
 
-        debug!("Destroying swap chain {:#?}", swapchain);
-        unsafe { loader.destroy_swapchain(swapchain, Some(&ALLOCATION_CALLBACKS)) };
+        debug!("Destroying swap chain {:#?}", self.swapchain);
+        unsafe {
+            self.swapchain_loader
+                .destroy_swapchain(self.swapchain, Some(&ALLOCATION_CALLBACKS))
+        };
     }
 
     fn create_render_targets(
@@ -1054,31 +1071,20 @@ impl State {
         }
     }
 
-    fn destroy_render_targets(
-        device: &ash::Device,
-        allocator: &vk_mem::Allocator,
-        depth_image: Image,
-    ) {
+    fn destroy_render_targets(&mut self) {
         debug!("Destroying render target images");
         debug!("Destroying depth image");
-        depth_image.destroy(device, allocator);
+        self.depth_image.destroy(&self.device, &self.allocator);
     }
 
-    fn recreate_swapchain(
-        &mut self,
-        swapchain: vk::SwapchainKHR,
-        swapchain_views: Vec<vk::ImageView>,
-        depth_image: Image,
-    ) {
+    fn resize(&mut self) {
         debug!("Recreating swap chain");
 
-        Self::destroy_render_targets(&self.device, &self.allocator, depth_image);
-        Self::destroy_swapchain(
-            &self.device,
-            &self.swapchain_loader,
-            swapchain,
-            swapchain_views,
-        );
+        debug!("Waiting for device idle");
+        unsafe { vulkan_check!(self.device.device_wait_idle()) };
+
+        self.destroy_render_targets();
+        self.destroy_swapchain();
         (self.swapchain, self.swapchain_images, self.swapchain_views) = Self::create_swapchain(
             &self.device,
             &self.gpus[self.gpu],
@@ -1166,7 +1172,7 @@ impl State {
         buffers.resize_with(3, || {
             vulkan_check!(HostBuffer::new(
                 allocator,
-                mem::size_of::<crate::engine::rendersystem::UniformData>() as u64,
+                mem::size_of::<rendersystem::UniformData>() as u64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             ))
@@ -1175,24 +1181,59 @@ impl State {
         buffers
     }
 
-    fn allocate_descriptor_sets(device: &ash::Device, layout: &vk::DescriptorSetLayout, pool: &vk::DescriptorPool, uniform_buffers: &Vec<HostBuffer>) -> Vec<vk::DescriptorSet {
+    fn allocate_descriptor_sets(
+        device: &ash::Device,
+        layout: &vk::DescriptorSetLayout,
+        pool: &vk::DescriptorPool,
+        uniform_buffers: &Vec<HostBuffer>,
+    ) -> Vec<vk::DescriptorSet> {
         debug!("Allocating {FRAME_COUNT} descriptor sets");
 
         let mut layouts = Vec::new();
-        layouts.resize_with(3, || {layout});
+        layouts.resize_with(3, || layout.clone());
 
         let descriptor_sets = unsafe {
             vulkan_check!(
-                device.allocate_descriptor_sets(
-                    &vk::DescriptorSetAllocateInfo {
-                        descriptor_pool: pool,
-                        descriptor_set_count: FRAME_COUNT,
-                        p_set_layouts: layouts.as_slice(),
-                        ..Default::default()
-                    }
-                )
+                device.allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
+                    descriptor_pool: pool.clone(),
+                    descriptor_set_count: FRAME_COUNT as u32,
+                    p_set_layouts: layouts.as_ptr(),
+                    ..Default::default()
+                })
             )
         };
+
+        let mut i = 0;
+        let mut buffer_infos = Vec::new();
+        buffer_infos.resize_with(FRAME_COUNT, || {
+            let info = vk::DescriptorBufferInfo {
+                offset: 0,
+                range: mem::size_of::<rendersystem::UniformData>() as u64,
+                buffer: uniform_buffers[i].buffer().handle().clone(),
+            };
+            i += 1;
+
+            info
+        });
+        i = 0;
+        let mut write_infos = Vec::new();
+        write_infos.resize_with(FRAME_COUNT, || {
+            let write = vk::WriteDescriptorSet {
+                dst_binding: 0,
+                dst_array_element: 0,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 1,
+                p_buffer_info: ptr::addr_of!(buffer_infos[i]),
+                dst_set: descriptor_sets[i],
+                ..Default::default()
+            };
+            i += 1;
+            write
+        });
+
+        unsafe { device.update_descriptor_sets(write_infos.as_slice(), &[]) };
+
+        descriptor_sets
     }
 
     pub fn init() -> Self {
@@ -1237,10 +1278,16 @@ impl State {
         let descriptor_layout = Self::create_descriptor_layout(&device);
         let descriptor_pool = Self::create_descriptor_pool(&device);
         let uniform_buffers = Self::allocate_uniform_buffers(&allocator);
+        let descriptor_sets = Self::allocate_descriptor_sets(
+            &device,
+            &descriptor_layout,
+            &descriptor_pool,
+            &uniform_buffers,
+        );
 
         debug!("Vulkan initialization succeeded");
 
-        let mut _self = Self {
+        let mut self_ = Self {
             entry,
             instance,
             device,
@@ -1267,19 +1314,230 @@ impl State {
             depth_image,
             descriptor_layout,
             descriptor_pool,
+            descriptor_sets,
             uniform_buffers,
-        };
-        _self.set_gpu(_self.gpu);
 
-        _self
+            frame_index: 0,
+            resized: false,
+            swapchain_index: 0,
+
+            last_shader: None,
+            last_model: None,
+        };
+        self_.set_gpu(self_.gpu);
+
+        self_
     }
 
-    pub fn begin_cmds(&mut self) {}
+    pub fn begin_cmds(&mut self) {
+        unsafe {
+            vulkan_check!(self.device.wait_for_fences(
+                &[self.fences[self.frame_index]],
+                true,
+                u64::MAX
+            ))
+        };
 
-    pub fn present(&mut self) {}
+        let (index, resized) = unsafe {
+            match self.swapchain_loader.acquire_next_image(
+                self.swapchain,
+                u64::MAX,
+                self.acquire_semaphores[self.frame_index],
+                vk::Fence::null(),
+            ) {
+                Ok(values) => values,
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => (0, true),
+                Err(err) => {
+                    panic!("Failed to acquire next image: {err}");
+                }
+            }
+        };
+        self.swapchain_index = index as usize;
+        self.resized = resized;
+        if self.resized {
+            self.resize();
+            return;
+        }
+
+        unsafe {
+            vulkan_check!(self.device.reset_fences(&[self.fences[self.frame_index]]));
+            vulkan_check!(self.device.reset_command_buffer(
+                self.command_buffers[self.frame_index],
+                vk::CommandBufferResetFlags::empty()
+            ));
+            vulkan_check!(self.device.begin_command_buffer(
+                self.command_buffers[self.frame_index],
+                &vk::CommandBufferBeginInfo {
+                    flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+                    ..Default::default()
+                }
+            ));
+        }
+
+        let layout_barrier = vk::ImageMemoryBarrier {
+            dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            old_layout: vk::ImageLayout::UNDEFINED,
+            new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            image: self.swapchain_images[self.swapchain_index],
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            ..Default::default()
+        };
+
+        unsafe {
+            self.device.cmd_pipeline_barrier(
+                self.command_buffers[self.frame_index],
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[layout_barrier],
+            )
+        };
+
+        let color_attachment = vk::RenderingAttachmentInfo {
+            image_view: self.swapchain_views[self.swapchain_index],
+            image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            load_op: vk::AttachmentLoadOp::CLEAR,
+            store_op: vk::AttachmentStoreOp::STORE,
+            clear_value: vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            },
+            ..Default::default()
+        };
+        let depth_attachment = vk::RenderingAttachmentInfo {
+            image_view: self.depth_image.view().clone(),
+            image_layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+            load_op: vk::AttachmentLoadOp::CLEAR,
+            store_op: vk::AttachmentStoreOp::STORE,
+            clear_value: vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            },
+            ..Default::default()
+        };
+        let rendering_info = vk::RenderingInfo {
+            color_attachment_count: 1,
+            p_color_attachments: ptr::addr_of!(color_attachment),
+            p_depth_attachment: ptr::addr_of!(depth_attachment),
+            layer_count: 1,
+            render_area: vk::Rect2D {
+                extent: self.swapchain_extent,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        unsafe {
+            self.device
+                .cmd_begin_rendering(self.command_buffers[self.frame_index], &rendering_info)
+        };
+    }
+
+    pub fn present(&mut self) {
+        if self.resized {
+            self.resized = false;
+            return;
+        }
+
+        unsafe {
+            self.device
+                .cmd_end_rendering(self.command_buffers[self.frame_index])
+        };
+
+        let layout_barrier = vk::ImageMemoryBarrier {
+            src_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            new_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+            image: self.swapchain_images[self.swapchain_index],
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            ..Default::default()
+        };
+
+        unsafe {
+            self.device.cmd_pipeline_barrier(
+                self.command_buffers[self.frame_index],
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[layout_barrier],
+            );
+
+            vulkan_check!(self
+                .device
+                .end_command_buffer(self.command_buffers[self.frame_index]));
+        };
+
+        let wait_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+        let submit_info = vk::SubmitInfo {
+            p_wait_dst_stage_mask: ptr::addr_of!(wait_stage),
+            wait_semaphore_count: 1,
+            p_wait_semaphores: ptr::addr_of!(self.acquire_semaphores[self.frame_index]),
+            signal_semaphore_count: 1,
+            p_signal_semaphores: ptr::addr_of!(self.render_complete_semaphores[self.frame_index]),
+            command_buffer_count: 1,
+            p_command_buffers: ptr::addr_of!(self.command_buffers[self.frame_index]),
+            ..Default::default()
+        };
+
+        unsafe {
+            vulkan_check!(self.device.queue_submit(
+                self.compute_queue,
+                &[submit_info],
+                self.fences[self.frame_index]
+            ))
+        }
+
+        let index = self.swapchain_index as u32;
+        let present_info = vk::PresentInfoKHR {
+            p_swapchains: ptr::addr_of!(self.swapchain),
+            swapchain_count: 1,
+            p_wait_semaphores: ptr::addr_of!(self.render_complete_semaphores[self.frame_index]),
+            wait_semaphore_count: 1,
+            p_image_indices: ptr::addr_of!(index),
+            ..Default::default()
+        };
+
+        match unsafe {
+            self.swapchain_loader
+                .queue_present(self.compute_queue, &present_info)
+        } {
+            Ok(_) => {}
+            Err(err) if err == vk::Result::ERROR_OUT_OF_DATE_KHR => {}
+            Err(err) => {
+                panic!(
+                    "Failed to present frame {} (swapchain image {}): {err}",
+                    self.frame_index, self.swapchain_index
+                )
+            }
+        }
+
+        self.frame_index = (self.frame_index + 1) % FRAME_COUNT;
+    }
 
     pub fn shutdown(mut self) {
         debug!("Vulkan shutdown started");
+
+        debug!("Waiting for device idle");
+        unsafe { vulkan_check!(self.device.device_wait_idle()) };
 
         unsafe {
             debug!("Freeing {FRAME_COUNT} uniform buffers");
@@ -1288,7 +1546,8 @@ impl State {
             }
 
             debug!("Destroying descriptor pool {:#?}", self.descriptor_pool);
-            self.device.destroy_descriptor_pool(self.descriptor_pool, Some(&ALLOCATION_CALLBACKS));
+            self.device
+                .destroy_descriptor_pool(self.descriptor_pool, Some(&ALLOCATION_CALLBACKS));
 
             debug!(
                 "Destroying descriptor set layout {:#?}",
@@ -1297,14 +1556,13 @@ impl State {
             self.device
                 .destroy_descriptor_set_layout(self.descriptor_layout, Some(&ALLOCATION_CALLBACKS));
 
-            Self::destroy_render_targets(&self.device, &self.allocator, self.depth_image);
-            Self::destroy_swapchain(
-                &self.device,
-                &self.swapchain_loader,
-                self.swapchain,
-                self.swapchain_views,
-            );
+            self.destroy_render_targets();
+            self.destroy_swapchain();
             debug!("Destroying {} semaphores", FRAME_COUNT * 2);
+            self.acquire_semaphores.iter().for_each(|semaphore| {
+                self.device
+                    .destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS))
+            });
             self.render_complete_semaphores
                 .iter()
                 .for_each(|semaphore| {
