@@ -47,24 +47,13 @@ extern "system" fn vulkan_dealloc(_p_user_data: *mut ffi::c_void, p_memory: *mut
     }
 }
 
-const ALLOCATION_CALLBACKS: vk::AllocationCallbacks = vk::AllocationCallbacks {
-    pfn_allocation: Some(vulkan_alloc),
-    pfn_reallocation: Some(vulkan_realloc),
-    pfn_free: Some(vulkan_dealloc),
-    p_user_data: ptr::null_mut(),
-    pfn_internal_allocation: None,
-    pfn_internal_free: None,
-};
-
 const FRAME_COUNT: usize = 3;
 
 struct GpuInfo {
     device: vk::PhysicalDevice,
 
-    memory_properties: vk::PhysicalDeviceMemoryProperties,
-    props: vk::PhysicalDeviceProperties,
+    properties: vk::PhysicalDeviceProperties,
 
-    surface_capabilities: vk::SurfaceCapabilitiesKHR,
     surface_formats: Vec<vk::SurfaceFormatKHR>,
     present_modes: Vec<vk::PresentModeKHR>,
 
@@ -101,7 +90,9 @@ impl Image {
         view_info.image = handle;
         view_info.format = format;
 
-        let view = unsafe { device.create_image_view(view_info, Some(&ALLOCATION_CALLBACKS)) };
+        let view = unsafe {
+            device.create_image_view(view_info, Some(&State::get_allocation_callbacks()))
+        };
         if view.is_err() {
             return Err(view.unwrap_err());
         }
@@ -117,7 +108,7 @@ impl Image {
 
     pub fn destroy(&mut self, device: &ash::Device, allocator: &vk_mem::Allocator) {
         unsafe {
-            device.destroy_image_view(self.view, Some(&ALLOCATION_CALLBACKS));
+            device.destroy_image_view(self.view, Some(&State::get_allocation_callbacks()));
             allocator.destroy_image(self.handle, self.allocation.take().unwrap());
         }
     }
@@ -388,6 +379,18 @@ pub struct State {
 }
 
 impl State {
+    fn get_allocation_callbacks<'a>() -> vk::AllocationCallbacks<'a> {
+        vk::AllocationCallbacks {
+            pfn_allocation: Some(vulkan_alloc),
+            pfn_reallocation: Some(vulkan_realloc),
+            pfn_free: Some(vulkan_dealloc),
+            p_user_data: ptr::null_mut(),
+            pfn_internal_allocation: None,
+            pfn_internal_free: None,
+            ..Default::default()
+        }
+    }
+
     unsafe extern "system" fn debug_log(
         severity: vk::DebugUtilsMessageSeverityFlagsEXT,
         types: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -442,20 +445,24 @@ impl State {
         };
 
         let extensions = [
-            extensions::khr::Surface::name(),
             #[cfg(feature = "graphics_debug")]
-            extensions::ext::DebugUtils::name(),
+            "VK_EXT_debug_utils",
+            "VK_KHR_surface",
             #[cfg(windows)]
-            extensions::khr::Win32Surface::name(),
+            "VK_KHR_win32_surface",
             #[cfg(unix)]
-            extensions::khr::XcbSurface::name(),
+            "VK_KHR_xcb_surface",
         ];
 
         let validation_layers = ["VK_LAYER_KHRONOS_validation"];
 
-        let extensions_raw: Vec<*const ffi::c_char> = extensions
+        let extensions_cstr: Vec<ffi::CString> = extensions
             .iter()
-            .map(|ext_name| ext_name.as_ptr())
+            .map(|extension_name| ffi::CString::new(*extension_name).unwrap())
+            .collect();
+        let extensions_raw: Vec<*const ffi::c_char> = extensions_cstr
+            .iter()
+            .map(|extension_name| extension_name.as_ptr())
             .collect();
         let layers_cstr: Vec<ffi::CString> = validation_layers
             .iter()
@@ -491,18 +498,20 @@ impl State {
             ..Default::default()
         };
 
-        let result = unsafe { entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) };
+        let result = unsafe {
+            entry.create_instance(&create_info, Some(&State::get_allocation_callbacks()))
+        };
         let instance = match result {
             Ok(val) => val,
             Err(err) if err == vk::Result::ERROR_LAYER_NOT_PRESENT => {
                 debug!("Validation layers not available, retrying with them disabled");
                 create_info.enabled_layer_count = 0;
                 unsafe {
-                    vulkan_check!(entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)))
+                    vulkan_check!(entry.create_instance(&create_info, Some(&State::get_allocation_callbacks())))
                 }
             }
             Err(err) =>
-                panic!("Vulkan call entry.create_instance(&create_info, Some(&ALLOCATION_CALLBACKS)) failed: {err}")
+                panic!("Vulkan call entry.create_instance(&create_info, Some(&State::get_allocation_callbacks())) failed: {err}")
         };
 
         debug!(
@@ -512,12 +521,8 @@ impl State {
         instance
     }
 
-    fn get_required_device_exts() -> [&'static ffi::CStr; 1] {
-        [
-            // TODO: fix when vk-mem supports a version of ash with this extension
-            //ffi::CStr::from_bytes_with_nul(b"VK_EXT_shader_object\0").unwrap(),
-            extensions::khr::Swapchain::name(),
-        ]
+    fn get_required_device_exts() -> [&'static str; 2] {
+        ["VK_KHR_swapchain", "VK_EXT_shader_object"]
     }
 
     fn get_gpus(
@@ -525,7 +530,7 @@ impl State {
         surface_loader: &extensions::khr::Surface,
         surface: &vk::SurfaceKHR,
     ) -> Vec<GpuInfo> {
-        debug!("Enumerating devices");
+        debug!("Enumerating devices (scores loosely based on memory, maximum viewport size, and discrete/integrated/CPU)");
         let devices = unsafe { vulkan_check!(instance.enumerate_physical_devices()) };
         let devices = devices
             .into_iter()
@@ -543,7 +548,7 @@ impl State {
                 continue;
             }
 
-            let Some((graphics_family_idx, _)) = queue_family_props
+            let Some((graphics_family_index, _)) = queue_family_props
                 .iter()
                 .enumerate()
                 .map(|(i, props)| (i as u32, props))
@@ -555,7 +560,7 @@ impl State {
                 continue;
             };
 
-            let Some((compute_family_idx, _)) = queue_family_props
+            let Some((compute_family_index, _)) = queue_family_props
                 .iter()
                 .enumerate()
                 .map(|(i, props)| (i as u32, props))
@@ -598,7 +603,7 @@ impl State {
 
             let fmts =
                 unsafe { surface_loader.get_physical_device_surface_formats(device, *surface) };
-            let surface_fmts = match fmts {
+            let surface_formats = match fmts {
                 Ok(val) if !val.is_empty() => val,
                 Ok(_) => {
                     error!("Ignoring device {i} because it has no surface formats");
@@ -625,45 +630,64 @@ impl State {
                 }
             };
 
-            let mem_props = unsafe { instance.get_physical_device_memory_properties(device) };
-            let props = unsafe { instance.get_physical_device_properties(device) };
+            let memory_properties = unsafe { instance.get_physical_device_memory_properties(device) };
+            let properties = unsafe { instance.get_physical_device_properties(device) };
 
-            let mut score = (mem_props.memory_heaps[0].size / 1_000) as u32
-                + (props.limits.max_viewport_dimensions[0] as u64
-                    * props.limits.max_viewport_dimensions[1] as u64
+            let mut score = (memory_properties.memory_heaps[0].size / 1_000) as u32
+                + (properties.limits.max_viewport_dimensions[0] as u64
+                    * properties.limits.max_viewport_dimensions[1] as u64
                     / 1_000) as u32;
             if [
                 vk::PhysicalDeviceType::DISCRETE_GPU,
                 vk::PhysicalDeviceType::VIRTUAL_GPU,
             ]
-            .contains(&props.device_type)
+            .contains(&properties.device_type)
             {
                 score *= 10;
-            } else if props.device_type == vk::PhysicalDeviceType::INTEGRATED_GPU {
+            } else if properties.device_type == vk::PhysicalDeviceType::INTEGRATED_GPU {
                 score *= 2;
             }
 
             let name = unsafe {
-                ffi::CStr::from_ptr(props.device_name.as_ptr())
+                ffi::CStr::from_ptr(properties.device_name.as_ptr())
                     .to_str()
                     .unwrap()
             };
 
+            let mut properties2 = unsafe { mem::zeroed::<vk::PhysicalDeviceProperties2>() };
+            unsafe { instance.get_physical_device_properties2(device, &mut properties2) };
+            let mut p_next = properties2.p_next;
+            let mut driver_info_ptr = ptr::null();
+            while !p_next.is_null() {
+                let type_ = unsafe { *(p_next as *mut vk::StructureType) };
+                if type_ == vk::StructureType::PHYSICAL_DEVICE_DRIVER_PROPERTIES {
+                    driver_info_ptr = p_next;
+                    break;
+                }
+
+                p_next = unsafe { (*(p_next as *mut vk::BaseOutStructure)).p_next as *mut ffi::c_void };
+            };
+
+            let driver_info = if !driver_info_ptr.is_null() {
+                unsafe { *(driver_info_ptr as *mut vk::PhysicalDeviceDriverProperties) }
+            } else {
+                vk::PhysicalDeviceDriverProperties::default()
+            };
+
             debug!("Device {i}:");
             debug!("\tName: {name}");
+            debug!("\tDriver information: {driver_info:#?}");
             debug!("\tScore: {score}");
-            debug!("\tType: {:#?}", props.device_type);
-            debug!("\tHandle: {:#?}", device);
+            debug!("\tType: {:#?}", properties.device_type);
+            debug!("\tHandle: {device:#?}");
 
             gpus.push(GpuInfo {
                 device,
-                memory_properties: mem_props,
-                props,
-                surface_capabilities: surface_caps,
-                surface_formats: surface_fmts,
+                properties,
+                surface_formats,
                 present_modes,
-                graphics_family_index: graphics_family_idx,
-                compute_family_index: compute_family_idx,
+                graphics_family_index,
+                compute_family_index,
                 performance_score: score,
             });
 
@@ -718,17 +742,21 @@ impl State {
             ..Default::default()
         };
 
-        let device_exts: Vec<*const ffi::c_char> = Self::get_required_device_exts()
+        let extensions_cstr: Vec<ffi::CString> = Self::get_required_device_exts()
             .iter()
-            .map(|ext_name| ext_name.as_ptr())
+            .map(|extension_name| ffi::CString::new(*extension_name).unwrap())
+            .collect();
+        let extensions_raw: Vec<*const ffi::c_char> = extensions_cstr
+            .iter()
+            .map(|extension_name| extension_name.as_ptr())
             .collect();
 
         let device_info = vk::DeviceCreateInfo {
             p_queue_create_infos: queue_create_infos.as_ptr(),
             queue_create_info_count: queue_create_infos.len() as u32,
             p_enabled_features: ptr::addr_of!(device_features),
-            pp_enabled_extension_names: device_exts.as_ptr(),
-            enabled_extension_count: device_exts.len() as u32,
+            pp_enabled_extension_names: extensions_raw.as_ptr(),
+            enabled_extension_count: extensions_raw.len() as u32,
             p_next: ptr::addr_of!(device_13_features) as *const ffi::c_void,
             ..Default::default()
         };
@@ -737,7 +765,7 @@ impl State {
             vulkan_check!(instance.create_device(
                 gpu.device,
                 &device_info,
-                Some(&ALLOCATION_CALLBACKS)
+                Some(&State::get_allocation_callbacks())
             ))
         };
 
@@ -764,7 +792,8 @@ impl State {
         let mut fences = Vec::new();
         for _ in 0..FRAME_COUNT {
             fences.push(unsafe {
-                vulkan_check!(device.create_fence(&fence_create_info, Some(&ALLOCATION_CALLBACKS)))
+                vulkan_check!(device
+                    .create_fence(&fence_create_info, Some(&State::get_allocation_callbacks())))
             })
         }
 
@@ -780,20 +809,24 @@ impl State {
         let mut acquire_semaphores = Vec::new();
         let mut complete_semaphores = Vec::new();
         acquire_semaphores.resize_with(3, || unsafe {
-            vulkan_check!(
-                device.create_semaphore(&semaphore_create_info, Some(&ALLOCATION_CALLBACKS))
-            )
+            vulkan_check!(device.create_semaphore(
+                &semaphore_create_info,
+                Some(&State::get_allocation_callbacks())
+            ))
         });
         complete_semaphores.resize_with(3, || unsafe {
-            vulkan_check!(
-                device.create_semaphore(&semaphore_create_info, Some(&ALLOCATION_CALLBACKS))
-            )
+            vulkan_check!(device.create_semaphore(
+                &semaphore_create_info,
+                Some(&State::get_allocation_callbacks())
+            ))
         });
 
         (acquire_semaphores, complete_semaphores)
     }
 
-    fn create_cmd_pools(device: &ash::Device, gpu: &GpuInfo) -> (vk::CommandPool, vk::CommandPool) {
+    fn create_command_pools(device: &ash::Device, gpu: &GpuInfo) -> (vk::CommandPool, vk::CommandPool) {
+        debug!("Creating command pools");
+
         let main_pool_info = vk::CommandPoolCreateInfo {
             flags: vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
             queue_family_index: gpu.graphics_family_index,
@@ -805,13 +838,17 @@ impl State {
         };
 
         let main_pool = unsafe {
-            vulkan_check!(device.create_command_pool(&main_pool_info, Some(&ALLOCATION_CALLBACKS)))
+            vulkan_check!(device
+                .create_command_pool(&main_pool_info, Some(&State::get_allocation_callbacks())))
         };
         let transfer_pool = unsafe {
-            vulkan_check!(
-                device.create_command_pool(&transfer_pool_info, Some(&ALLOCATION_CALLBACKS))
-            )
+            vulkan_check!(device.create_command_pool(
+                &transfer_pool_info,
+                Some(&State::get_allocation_callbacks())
+            ))
         };
+
+        debug!("Created main command pool {main_pool:#?} and transfer command pool {transfer_pool:#?}");
 
         (main_pool, transfer_pool)
     }
@@ -820,7 +857,7 @@ impl State {
         device: &ash::Device,
         cmd_pool: &vk::CommandPool,
     ) -> Vec<vk::CommandBuffer> {
-        debug!("Allocating command buffers");
+        debug!("Allocating {FRAME_COUNT} command buffers");
 
         unsafe {
             vulkan_check!(
@@ -862,10 +899,12 @@ impl State {
             if format.format == vk::Format::B8G8R8A8_UNORM
                 && format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
             {
+                debug!("Chose format {format:#?}");
                 return format;
             }
         }
-
+        
+        debug!("Chose format {:#?}", gpu.surface_formats[0]);
         gpu.surface_formats[0]
     }
 
@@ -874,10 +913,12 @@ impl State {
 
         for &mode in &gpu.present_modes {
             if mode == vk::PresentModeKHR::MAILBOX {
+                debug!("Chose present mode {mode:#?}");
                 return mode;
             }
         }
 
+        debug!("Chose FIFO present mode");
         vk::PresentModeKHR::FIFO
     }
 
@@ -928,7 +969,9 @@ impl State {
         };
 
         let swapchain = unsafe {
-            vulkan_check!(loader.create_swapchain(&swapchain_info, Some(&ALLOCATION_CALLBACKS)))
+            vulkan_check!(
+                loader.create_swapchain(&swapchain_info, Some(&State::get_allocation_callbacks()))
+            )
         };
         let images = unsafe { vulkan_check!(loader.get_swapchain_images(swapchain)) };
 
@@ -963,9 +1006,11 @@ impl State {
 
                     ..Default::default()
                 },
-                Some(&ALLOCATION_CALLBACKS)
+                Some(&State::get_allocation_callbacks())
             ))
         });
+
+        debug!("Created swapchain {swapchain:#?}");
 
         (swapchain, images, views)
     }
@@ -974,13 +1019,13 @@ impl State {
         debug!("Destroying {FRAME_COUNT} swap chain image views");
         self.swapchain_views.iter().for_each(|view| unsafe {
             self.device
-                .destroy_image_view(*view, Some(&ALLOCATION_CALLBACKS))
+                .destroy_image_view(*view, Some(&State::get_allocation_callbacks()))
         });
 
         debug!("Destroying swap chain {:#?}", self.swapchain);
         unsafe {
             self.swapchain_loader
-                .destroy_swapchain(self.swapchain, Some(&ALLOCATION_CALLBACKS))
+                .destroy_swapchain(self.swapchain, Some(&State::get_allocation_callbacks()))
         };
     }
 
@@ -1044,6 +1089,7 @@ impl State {
                 ..Default::default()
             }
         ));
+        debug!("Created depth image {:#?}", depth_image.handle());
 
         (depth_image)
     }
@@ -1065,15 +1111,21 @@ impl State {
             ..Default::default()
         };
 
-        unsafe {
-            vulkan_check!(device
-                .create_descriptor_set_layout(&descriptor_layout_info, Some(&ALLOCATION_CALLBACKS)))
-        }
+        let layout = unsafe {
+            vulkan_check!(device.create_descriptor_set_layout(
+                &descriptor_layout_info,
+                Some(&State::get_allocation_callbacks())
+            ))
+        };
+
+        debug!("Created descriptor set layout {layout:#?}");
+
+        layout
     }
 
     fn destroy_render_targets(&mut self) {
         debug!("Destroying render target images");
-        debug!("Destroying depth image");
+        debug!("Destroying depth image {:#?}", self.depth_image.handle());
         self.depth_image.destroy(&self.device, &self.allocator);
     }
 
@@ -1154,7 +1206,7 @@ impl State {
             },
         ];
 
-        unsafe {
+        let pool = unsafe {
             vulkan_check!(device.create_descriptor_pool(
                 &vk::DescriptorPoolCreateInfo {
                     flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
@@ -1163,9 +1215,13 @@ impl State {
                     max_sets: 1000 * POOL_SIZES.len() as u32,
                     ..Default::default()
                 },
-                Some(&ALLOCATION_CALLBACKS)
+                Some(&State::get_allocation_callbacks())
             ))
-        }
+        };
+
+        debug!("Created descriptor pool {pool:#?}");
+
+        pool
     }
 
     fn allocate_uniform_buffers(allocator: &vk_mem::Allocator) -> Vec<HostBuffer> {
@@ -1249,12 +1305,12 @@ impl State {
         let surface = crate::platform::video::create_vulkan_surface(
             &entry,
             &instance,
-            Some(&ALLOCATION_CALLBACKS),
+            Some(&State::get_allocation_callbacks()),
         );
         let gpus = Self::get_gpus(&instance, &surface_loader, &surface);
         let gpu = 0;
         let (device, graphics_queue, compute_queue) = Self::create_device(&instance, &gpus[gpu]);
-        let (command_pool, transfer_pool) = Self::create_cmd_pools(&device, &gpus[gpu]);
+        let (command_pool, transfer_pool) = Self::create_command_pools(&device, &gpus[gpu]);
         let command_buffers = Self::allocate_command_buffers(&device, &command_pool);
         let allocator = Self::create_allocator(&instance, &device, gpus[gpu].device);
         let fences = Self::create_fences(&device);
@@ -1546,54 +1602,60 @@ impl State {
             }
 
             debug!("Destroying descriptor pool {:#?}", self.descriptor_pool);
-            self.device
-                .destroy_descriptor_pool(self.descriptor_pool, Some(&ALLOCATION_CALLBACKS));
+            self.device.destroy_descriptor_pool(
+                self.descriptor_pool,
+                Some(&State::get_allocation_callbacks()),
+            );
 
             debug!(
                 "Destroying descriptor set layout {:#?}",
                 self.descriptor_layout
             );
-            self.device
-                .destroy_descriptor_set_layout(self.descriptor_layout, Some(&ALLOCATION_CALLBACKS));
+            self.device.destroy_descriptor_set_layout(
+                self.descriptor_layout,
+                Some(&State::get_allocation_callbacks()),
+            );
 
             self.destroy_render_targets();
             self.destroy_swapchain();
             debug!("Destroying {} semaphores", FRAME_COUNT * 2);
             self.acquire_semaphores.iter().for_each(|semaphore| {
                 self.device
-                    .destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS))
+                    .destroy_semaphore(*semaphore, Some(&State::get_allocation_callbacks()))
             });
             self.render_complete_semaphores
                 .iter()
                 .for_each(|semaphore| {
                     self.device
-                        .destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS))
+                        .destroy_semaphore(*semaphore, Some(&State::get_allocation_callbacks()))
                 });
 
             debug!("Destroying {FRAME_COUNT} fences");
             self.fences.iter().for_each(|fence| {
                 self.device
-                    .destroy_fence(*fence, Some(&ALLOCATION_CALLBACKS))
+                    .destroy_fence(*fence, Some(&State::get_allocation_callbacks()))
             });
             self.acquire_semaphores.iter().for_each(|semaphore| {
                 self.device
-                    .destroy_semaphore(*semaphore, Some(&ALLOCATION_CALLBACKS))
+                    .destroy_semaphore(*semaphore, Some(&State::get_allocation_callbacks()))
             });
             debug!("Destroying transfer command pool {:#?}", self.transfer_pool);
             self.device
-                .destroy_command_pool(self.transfer_pool, Some(&ALLOCATION_CALLBACKS));
+                .destroy_command_pool(self.transfer_pool, Some(&State::get_allocation_callbacks()));
             debug!("Destroying command pool {:#?}", self.command_pool);
             self.device
-                .destroy_command_pool(self.command_pool, Some(&ALLOCATION_CALLBACKS));
+                .destroy_command_pool(self.command_pool, Some(&State::get_allocation_callbacks()));
             debug!("Destroying allocator");
             ptr::drop_in_place(ptr::addr_of_mut!(self.allocator));
             debug!("Destroying logical device {:#?}", self.device.handle());
-            self.device.destroy_device(Some(&ALLOCATION_CALLBACKS));
+            self.device
+                .destroy_device(Some(&State::get_allocation_callbacks()));
             debug!("Destroying surface {:#?}", self.surface);
             self.surface_loader
-                .destroy_surface(self.surface, Some(&ALLOCATION_CALLBACKS));
+                .destroy_surface(self.surface, Some(&State::get_allocation_callbacks()));
             debug!("Destroying instance {:#?}", self.instance.handle());
-            self.instance.destroy_instance(Some(&ALLOCATION_CALLBACKS));
+            self.instance
+                .destroy_instance(Some(&State::get_allocation_callbacks()));
         }
 
         debug!("Vulkan shutdown succeeded");
@@ -1606,21 +1668,25 @@ impl State {
             let gpu = &self.gpus[self.gpu];
 
             let name = unsafe {
-                ffi::CStr::from_ptr(gpu.props.device_name.as_ptr())
+                ffi::CStr::from_ptr(gpu.properties.device_name.as_ptr())
                     .to_str()
                     .unwrap()
             };
             debug!(
                 "Selected {:#?} device {}, {} [{:04x}:{:04x}] with score {}",
-                gpu.props.device_type,
+                gpu.properties.device_type,
                 gpu_idx,
                 name,
-                gpu.props.vendor_id,
-                gpu.props.device_id,
+                gpu.properties.vendor_id,
+                gpu.properties.device_id,
                 gpu.performance_score
             );
         }
 
         old_idx
     }
+}
+
+pub struct ShaderData {
+    handle: vk::ShaderEXT,
 }

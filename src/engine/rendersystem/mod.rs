@@ -2,12 +2,19 @@ use log::info;
 use nalgebra::*;
 use std::sync::Mutex;
 
+#[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
+mod vulkan;
+
+mod render_impl {
+    #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
+    pub use crate::engine::rendersystem::vulkan::*;
+}
+
 pub struct Shader {
     name: String,
     vertex_binary: Vec<u8>,
     fragment_binary: Vec<u8>,
-    //#[cfg(not(any(macos, ios)))]
-    //handle: VulkanShader,
+    handle: render_impl::ShaderData
 }
 
 #[repr(C)]
@@ -20,8 +27,7 @@ pub struct UniformData {
 pub struct RenderTexture {
     name: String,
     texture: crate::texture::Texture,
-    //#[cfg(not(any(macos, ios)))]
-    //handle: VulkanTexture,
+    //handle: render_impl::TextureData
 }
 
 pub struct Material {
@@ -38,16 +44,7 @@ pub struct Model {
     name: String,
     //mesh: Mesh,
     material: Material,
-    //#[cfg(not(any(macos, ios)))]
-    //handle: VulkanModel
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
-mod vulkan;
-
-mod render_impl {
-    #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
-    pub use crate::engine::rendersystem::vulkan::*;
+    //handle: render_impl::ModelData
 }
 
 static STATE: Mutex<Option<render_impl::State>> = Mutex::new(None);
