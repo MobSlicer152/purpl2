@@ -1,3 +1,5 @@
 /.vs
 **/target
 /out
+**/fleet.toml
+**/.cargo
