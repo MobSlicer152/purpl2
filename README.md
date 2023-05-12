@@ -10,6 +10,11 @@ Use Cargo.
 
 [Install Rust and its dependencies.](https://www.rust-lang.org/tools/install)
 
+### System requirements
+
+You need a GPU driver with support for Vulkan 1.3 and the `VK_EXT_shader_object` extension.
+Currently, that means a beta driver, but you can use the instructions [here](https://github.com/KhronosGroup/Vulkan-ExtensionLayer/blob/main/docs/shader_object_layer.md).
+
 ### Interesting stuff I guess
 
 This is a Rust rewrite of [my C engine](https://github.com/MobSlicer152/purpl-engine).

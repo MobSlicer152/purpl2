@@ -454,7 +454,9 @@ impl State {
             "VK_KHR_xcb_surface",
         ];
 
-        let validation_layers = ["VK_LAYER_KHRONOS_validation"];
+        let layers = [
+            "VK_LAYER_KHRONOS_validation"
+        ];
 
         let extensions_cstr: Vec<ffi::CString> = extensions
             .iter()
@@ -464,7 +466,7 @@ impl State {
             .iter()
             .map(|extension_name| extension_name.as_ptr())
             .collect();
-        let layers_cstr: Vec<ffi::CString> = validation_layers
+        let layers_cstr: Vec<ffi::CString> = layers
             .iter()
             .map(|layer_name| ffi::CString::new(*layer_name).unwrap())
             .collect();
