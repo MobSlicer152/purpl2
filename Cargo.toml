@@ -38,3 +38,4 @@ vk-mem = { git = "https://github.com/MobSlicer152/vk-mem-rs" }
 default = ["graphics_debug", "release_log"]
 graphics_debug = []
 release_log = []
+verbose_log = []

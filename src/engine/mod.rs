@@ -70,6 +70,8 @@ fn setup_logger() -> Result<(), fern::InitError> {
     let dispatch = dispatch.level(log::LevelFilter::Debug);
     #[cfg(all(not(build = "debug"), feature = "release_log"))]
     let dispatch = dispatch.level(log::LevelFilter::Info);
+    #[cfg(feature = "verbose_log")]
+    let dispatch = dispatch.level(log::LevelFilter::Trace);
     #[cfg(any(build = "debug", all(not(build = "debug"), feature = "release_log")))]
     let dispatch = dispatch.chain(io::stdout());
 

@@ -17,6 +17,17 @@ extern "system" fn vulkan_alloc(
     alignment: usize,
     _allocation_scope: vk::SystemAllocationScope,
 ) -> *mut ffi::c_void {
+    let alignment = if alignment.is_power_of_two() {
+        alignment
+    } else {
+        alignment + 1
+    };
+    let size = if size == 0 {
+        alignment
+    } else {
+        size
+    };
+    trace!("Allocating {size} byte(s) aligned to {alignment} for Vulkan");
     unsafe {
         alloc::alloc(alloc::Layout::from_size_align(size, alignment).unwrap()) as *mut ffi::c_void
     }
@@ -29,6 +40,19 @@ extern "system" fn vulkan_realloc(
     alignment: usize,
     _allocation_scope: vk::SystemAllocationScope,
 ) -> *mut ffi::c_void {
+    let alignment = if alignment == 0 {
+        2
+    } else if alignment.is_power_of_two() {
+        alignment
+    } else {
+        alignment + 1
+    };
+    let size = if size == 0 {
+        alignment
+    } else {
+        size
+    };
+    trace!("Reallocating Vulkan allocation {:X} to {size} byte(s) aligned to {alignment}", p_original as usize);
     unsafe {
         alloc::realloc(
             p_original as *mut u8,
@@ -39,6 +63,7 @@ extern "system" fn vulkan_realloc(
 }
 
 extern "system" fn vulkan_dealloc(_p_user_data: *mut ffi::c_void, p_memory: *mut ffi::c_void) {
+    trace!("Freeing Vulkan allocation {:X}", p_memory as usize);
     unsafe {
         alloc::dealloc(
             p_memory as *mut u8,
