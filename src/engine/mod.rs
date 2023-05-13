@@ -5,12 +5,13 @@ use chrono::Local;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::info;
 use std::sync::Mutex;
-use std::{fs, io};
+use std::{env, fs, io};
 
 const FRAME_SMOOTHING: f64 = 0.9;
 
 #[derive(Default)]
 struct State {
+    game_dir: String,
     start_time: i64,
     last_time: i64,
     runtime: i64,
@@ -93,6 +94,11 @@ pub fn init() {
 
     info!("Engine initialization started");
 
+    *STATE.lock().unwrap() = Some(State {
+
+        ..Default::default()
+    });
+
     platform::video::init();
     rendersystem::init();
 }
@@ -105,9 +111,6 @@ pub fn update() {
     if STATE.lock().unwrap().is_some() {
         get_state!().update();
     } else {
-        *STATE.lock().unwrap() = Some(State {
-            ..Default::default()
-        });
         get_state!().start_time = chrono::Local::now().timestamp();
     }
 
@@ -126,6 +129,7 @@ pub fn shutdown() {
 }
 
 use crate::GAME_NAME;
+use crate::GAME_EXECUTABLE_NAME;
 pub struct DataDirs;
 impl DataDirs {
     pub fn all() -> Vec<String> {
@@ -144,5 +148,20 @@ impl DataDirs {
 
     pub fn saves() -> String {
         Self::base() + "saves/"
+    }
+}
+
+pub struct GameDirs;
+impl GameDirs {
+    pub fn all() -> Vec<String> {
+        vec![Self::base(), Self::shaders()]
+    }
+
+    pub fn base() -> String {
+        format!("{GAME_DIR}/{GAME_EXECUTABLE_NAME}/")
+    }
+
+    pub fn shaders() -> String {
+        Self::base() + "shaders/"
     }
 }

@@ -13,6 +13,7 @@ embed-resource = "2.1.1"
 
 [dependencies]
 chrono = "0.4.24"
+clap = { version = "4.2.7", features = ["derive"] }
 directories = "5.0.0"
 fern = { version = "0.6.2", features = ["colored"] }
 log = "0.4"

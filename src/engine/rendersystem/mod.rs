@@ -1,6 +1,6 @@
-use log::info;
+use log::{error, info};
 use nalgebra::*;
-use std::sync::Mutex;
+use std::{fs, io, sync::Mutex};
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
 mod vulkan;
@@ -10,11 +10,45 @@ mod render_impl {
     pub use crate::engine::rendersystem::vulkan::*;
 }
 
+#[derive(Debug)]
+pub enum ShaderError {
+    Io(io::Error)
+}
+
 pub struct Shader {
     name: String,
-    vertex_binary: Vec<u8>,
-    fragment_binary: Vec<u8>,
     handle: render_impl::ShaderData,
+}
+
+impl Shader {
+    pub fn new(name: String) -> Result<Self, ShaderError> {
+        let vertex_binary = match fs::read(crate::engine::GameDirs::shaders() + name.as_str() + ".vert.spv") {
+            Ok(data) => data,
+            Err(err) => {
+                error!("Failed to read vertex binary for shader {name}: {err}");
+                return Err(ShaderError::Io(err));
+            }
+        };
+        let fragment_binary = match fs::read(crate::engine::GameDirs::shaders() + name.as_str() + ".frag.spv") {
+            Ok(data) => data,
+            Err(err) => {
+                error!("Failed to read fragment binary for shader {name}: {err}");
+                return Err(ShaderError::Io(err));
+            }
+        };
+        let handle = match render_impl::ShaderData::new(&name, vertex_binary, fragment_binary) {
+            Ok(handle) => handle,
+            Err(err) => {
+                error!("Failed to create shader {name}: {err:?}");
+                return Err(err);
+            }
+        };
+
+        Ok(Self {
+            name,
+            handle
+        })
+    }
 }
 
 #[repr(C)]

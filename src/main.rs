@@ -19,6 +19,12 @@ use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+#[derive(clap::Parser, Debug)]
+struct Args {
+    #[arg(short, long, default_value_t = GAME_EXECUTABLE_NAME.clone().to_str())]
+    game: String,
+}
+
 fn main() {
     platform::init();
     engine::init();

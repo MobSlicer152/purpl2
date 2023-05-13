@@ -1724,3 +1724,9 @@ impl State {
 pub struct ShaderData {
     handle: vk::ShaderEXT,
 }
+
+impl ShaderData {
+    pub fn new(name: &String, vertex_binary: Vec<u8>, fragment_binary: Vec<u8>) -> Result<Self, crate::engine::rendersystem::ShaderError> {
+        
+    }
+}
