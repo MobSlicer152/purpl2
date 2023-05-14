@@ -22,11 +22,7 @@ extern "system" fn vulkan_alloc(
     } else {
         alignment + 1
     };
-    let size = if size == 0 {
-        alignment
-    } else {
-        size
-    };
+    let size = if size == 0 { alignment } else { size };
     trace!("Allocating {size} byte(s) aligned to {alignment} for Vulkan");
     unsafe {
         alloc::alloc(alloc::Layout::from_size_align(size, alignment).unwrap()) as *mut ffi::c_void
@@ -47,12 +43,11 @@ extern "system" fn vulkan_realloc(
     } else {
         alignment + 1
     };
-    let size = if size == 0 {
-        alignment
-    } else {
-        size
-    };
-    trace!("Reallocating Vulkan allocation {:X} to {size} byte(s) aligned to {alignment}", p_original as usize);
+    let size = if size == 0 { alignment } else { size };
+    trace!(
+        "Reallocating Vulkan allocation {:X} to {size} byte(s) aligned to {alignment}",
+        p_original as usize
+    );
     unsafe {
         alloc::realloc(
             p_original as *mut u8,
@@ -363,6 +358,7 @@ pub struct State {
     device: ash::Device,
     surface_loader: extensions::khr::Surface,
     swapchain_loader: extensions::khr::Swapchain,
+    shader_object_loader: extensions::ext::ShaderObject,
     surface: vk::SurfaceKHR,
 
     allocator: vk_mem::Allocator,
@@ -398,6 +394,8 @@ pub struct State {
 
     frame_index: usize,
     resized: bool,
+
+    pub shaders: Vec<rendersystem::Shader>,
 
     last_shader: Option<Arc<rendersystem::Shader>>,
     last_model: Option<Arc<rendersystem::Model>>,
@@ -479,9 +477,7 @@ impl State {
             "VK_KHR_xcb_surface",
         ];
 
-        let layers = [
-            "VK_LAYER_KHRONOS_validation"
-        ];
+        let layers = ["VK_LAYER_KHRONOS_validation"];
 
         let extensions_cstr: Vec<ffi::CString> = extensions
             .iter()
@@ -1376,6 +1372,7 @@ impl State {
             &descriptor_pool,
             &uniform_buffers,
         );
+        let shader_object_loader = extensions::ext::ShaderObject::new(&instance, &device);
 
         debug!("Vulkan initialization succeeded");
 
@@ -1385,6 +1382,7 @@ impl State {
             device,
             surface_loader,
             swapchain_loader,
+            shader_object_loader,
             surface,
             gpu,
             gpus,
@@ -1412,6 +1410,8 @@ impl State {
             frame_index: 0,
             resized: false,
             swapchain_index: 0,
+
+            shaders: Vec::new(),
 
             last_shader: None,
             last_model: None,
@@ -1721,12 +1721,80 @@ impl State {
     }
 }
 
+pub type ShaderErrorType = vk::Result;
+
 pub struct ShaderData {
-    handle: vk::ShaderEXT,
+    vertex_handle: vk::ShaderEXT,
+    fragment_handle: vk::ShaderEXT,
 }
 
 impl ShaderData {
-    pub fn new(name: &String, vertex_binary: Vec<u8>, fragment_binary: Vec<u8>) -> Result<Self, crate::engine::rendersystem::ShaderError> {
+    pub fn new(
+        state: &State,
+        name: &str,
+        vertex_binary: Vec<u8>,
+        fragment_binary: Vec<u8>,
+    ) -> Result<Self, crate::engine::rendersystem::ShaderError> {
+        let vertex_info = vk::ShaderCreateInfoEXT {
+            flags: vk::ShaderCreateFlagsEXT::LINK_STAGE,
+            stage: vk::ShaderStageFlags::VERTEX,
+            next_stage: vk::ShaderStageFlags::FRAGMENT,
+            code_type: vk::ShaderCodeTypeEXT::SPIRV,
+            p_code: vertex_binary.as_ptr() as *const ffi::c_void,
+            code_size: vertex_binary.len(),
+            p_name: b"main\0".as_ptr() as *const i8,
+            p_set_layouts: &state.descriptor_layout,
+            set_layout_count: 1,
+            ..Default::default()
+        };
+        let fragment_info = vk::ShaderCreateInfoEXT {
+            flags: vk::ShaderCreateFlagsEXT::LINK_STAGE,
+            stage: vk::ShaderStageFlags::FRAGMENT,
+            code_type: vk::ShaderCodeTypeEXT::SPIRV,
+            p_code: fragment_binary.as_ptr() as *const ffi::c_void,
+            code_size: fragment_binary.len(),
+            p_name: b"main\0".as_ptr() as *const i8,
+            p_set_layouts: &state.descriptor_layout,
+            set_layout_count: 1,
+            ..Default::default()
+        };
+
+        let (vertex_handle, fragment_handle) = match unsafe {
+            state.shader_object_loader.create_shaders(
+                &[vertex_info, fragment_info],
+                Some(&State::get_allocation_callbacks()),
+            )
+        } {
+            Ok(shaders) => (shaders[0], shaders[1]),
+            Err(err) => {
+                error!("Failed to create Vulkan shader {name}: {err}");
+                return Err(crate::engine::rendersystem::ShaderError::Backend(err));
+            }
+        };
         
+        Ok(Self {
+            vertex_handle,
+            fragment_handle,
+        })
+    }
+
+    pub fn destroy(&self, backend: &State) {
+        unsafe {
+            backend
+                .shader_object_loader
+                .destroy_shader(self.vertex_handle, Some(&State::get_allocation_callbacks()));
+            backend.shader_object_loader.destroy_shader(
+                self.fragment_handle,
+                Some(&State::get_allocation_callbacks()),
+            );
+        }
+    }
+
+    pub fn vertex_extension() -> String {
+        String::from(".vert.spv")
+    }
+
+    pub fn fragment_extension() -> String {
+        String::from(".frag.spv")
     }
 }

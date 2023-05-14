@@ -11,6 +11,9 @@ test = false
 [build-dependencies]
 embed-resource = "2.1.1"
 
+[target.'cfg(not(any(macos, ios, xbox)))'.build-dependencies]
+shaderc = "0.8.2"
+
 [dependencies]
 chrono = "0.4.24"
 clap = { version = "4.2.7", features = ["derive"] }
@@ -20,6 +23,7 @@ log = "0.4"
 mimalloc = "0.1.36"
 nalgebra = "0.32.2"
 once_cell = "1.17.1"
+#physx = "0.18.0"
 
 # Local crates
 texture = { path = "formats/texture" }

@@ -1,9 +1,9 @@
-mod rendersystem;
+pub mod rendersystem;
 
 use crate::platform;
 use chrono::Local;
 use fern::colors::{Color, ColoredLevelConfig};
-use log::info;
+use log::{debug, info};
 use std::sync::Mutex;
 use std::{env, fs, io};
 
@@ -81,7 +81,9 @@ fn setup_logger() -> Result<(), fern::InitError> {
     Ok(())
 }
 
-pub fn init() {
+pub fn init(args: crate::Args) {
+    debug!("{args:#?}");
+
     for dir in DataDirs::all() {
         if fs::create_dir_all(dir.clone()).is_err() {
             panic!("Failed to create engine data directory {dir}")
@@ -95,7 +97,7 @@ pub fn init() {
     info!("Engine initialization started");
 
     *STATE.lock().unwrap() = Some(State {
-
+        game_dir: args.game,
         ..Default::default()
     });
 
@@ -128,8 +130,8 @@ pub fn shutdown() {
     info!("Engine shutdown succeeded");
 }
 
-use crate::GAME_NAME;
 use crate::GAME_EXECUTABLE_NAME;
+use crate::GAME_NAME;
 pub struct DataDirs;
 impl DataDirs {
     pub fn all() -> Vec<String> {
@@ -158,7 +160,7 @@ impl GameDirs {
     }
 
     pub fn base() -> String {
-        format!("{GAME_DIR}/{GAME_EXECUTABLE_NAME}/")
+        format!("{}/", get_state!().game_dir)
     }
 
     pub fn shaders() -> String {

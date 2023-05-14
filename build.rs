@@ -1,11 +1,11 @@
-use std::env;
+use std::{env, fs, io};
 
 include!("src/game.rs");
 
 fn main() {
-    if let Ok(profile) = env::var("PROFILE") {
-        println!("cargo:rustc-cfg=build={:?}", profile);
-    }
+    let profile = env::var("PROFILE").unwrap();
+
+    println!("cargo:rustc-cfg=build={:?}", profile);
 
     #[cfg(windows)]
     embed_resource::compile(
@@ -22,4 +22,57 @@ fn main() {
             std::format!("GAME_VERSION_PATCH={}", GAME_VERSION_PATCH),
         ],
     );
+
+    #[cfg(not(any(macos, ios, xbox)))]
+    {
+        use shaderc;
+
+        const shader_dir: &'static str = "src/engine/rendersystem/shaders/vulkan/";
+        let output_dir = format!("target/{profile}/{GAME_EXECUTABLE_NAME}/shaders/");
+
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let compiler = shaderc::Compiler::new().unwrap();
+
+        let mut entries = fs::read_dir(shader_dir)
+            .unwrap()
+            .map(|res| res.map(|e| e.path()))
+            .collect::<Result<Vec<_>, io::Error>>()
+            .unwrap();
+        entries.sort();
+
+        entries.iter().for_each(|entry| {
+            let binary_path = entry
+                .to_str()
+                .unwrap()
+                .replace(shader_dir, output_dir.as_str())
+                + ".spv";
+            let binary_meta = fs::metadata(&binary_path);
+            // only compile if source has probably changed
+            if binary_meta.is_err()
+                || (binary_meta.is_ok()
+                    && fs::metadata(&entry).unwrap().modified().unwrap()
+                        > binary_meta.unwrap().modified().unwrap())
+            {
+                let content = String::from_utf8(fs::read(&entry).unwrap()).unwrap();
+                let extension = entry.as_path().extension().unwrap().to_str().unwrap();
+                let binary = compiler
+                    .compile_into_spirv(
+                        content.as_str(),
+                        match extension {
+                            "vert" => shaderc::ShaderKind::Vertex,
+                            "frag" => shaderc::ShaderKind::Fragment,
+                            "comp" => shaderc::ShaderKind::Compute,
+                            _ => panic!("Unknown Vulkan shader file extension {extension}"),
+                        },
+                        entry.as_os_str().to_str().unwrap(),
+                        "main",
+                        None,
+                    )
+                    .unwrap();
+
+                fs::write(&binary_path, binary.as_binary_u8()).unwrap();
+            }
+        });
+    }
 }
