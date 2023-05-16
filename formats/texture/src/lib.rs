@@ -85,17 +85,13 @@ impl io::Read for TextureReader {
 
 impl Texture {
     pub fn new(format: Pixel, width: u32, height: u32, pixels: Vec<Pixel>) -> Result<Self, TextureError> {
-        let mut raw_pixels = Vec::new();
-        for pixel in pixels {
-            let mut pixel = match zstd::bulk::compress(
-                &mut postcard::to_allocvec_cobs(&pixel).unwrap(),
-                zstd::DEFAULT_COMPRESSION_LEVEL,
-            ) {
-                Ok(pixel) => pixel,
-                Err(err) => { return Err(TextureError::Io(err)); }
-            };
-            raw_pixels.append(&mut pixel);
-        }
+        let raw_pixels = match zstd::bulk::compress(
+            &mut postcard::to_allocvec_cobs(pixels.as_slice()).unwrap(),
+            zstd::DEFAULT_COMPRESSION_LEVEL,
+        ) {
+            Ok(pixel) => pixel,
+            Err(err) => { return Err(TextureError::Io(err)); }
+        };
 
         Ok(Self {
             version: TEXTURE_VERSION,
