@@ -1743,7 +1743,7 @@ impl ShaderData {
             p_code: vertex_binary.as_ptr() as *const ffi::c_void,
             code_size: vertex_binary.len(),
             p_name: b"main\0".as_ptr() as *const i8,
-            p_set_layouts: &state.descriptor_layout,
+            p_set_layouts: ptr::addr_of!(state.descriptor_layout),
             set_layout_count: 1,
             ..Default::default()
         };
@@ -1754,7 +1754,7 @@ impl ShaderData {
             p_code: fragment_binary.as_ptr() as *const ffi::c_void,
             code_size: fragment_binary.len(),
             p_name: b"main\0".as_ptr() as *const i8,
-            p_set_layouts: &state.descriptor_layout,
+            p_set_layouts: ptr::addr_of!(state.descriptor_layout),
             set_layout_count: 1,
             ..Default::default()
         };

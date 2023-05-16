@@ -22,7 +22,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 #[derive(Parser, Debug)]
 pub struct Args {
-    #[arg(short, long, default_value_t = GAME_EXECUTABLE_NAME.clone().to_string())]
+    #[arg(short, long, default_value_t = String::from(GAME_EXECUTABLE_NAME.clone()))]
     game: String,
 }
 
