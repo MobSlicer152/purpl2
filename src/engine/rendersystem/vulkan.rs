@@ -1583,11 +1583,11 @@ impl State {
         let submit_info = vk::SubmitInfo {
             p_wait_dst_stage_mask: ptr::addr_of!(wait_stage),
             wait_semaphore_count: 1,
-            p_wait_semaphores: [self.acquire_semaphores[self.frame_index]].as_ptr(),
+            p_wait_semaphores: ptr::addr_of!(self.acquire_semaphores[self.frame_index]),
             signal_semaphore_count: 1,
-            p_signal_semaphores: [self.render_complete_semaphores[self.frame_index]].as_ptr(),
+            p_signal_semaphores: ptr::addr_of!(self.render_complete_semaphores[self.frame_index]),
             command_buffer_count: 1,
-            p_command_buffers: [self.command_buffers[self.frame_index]].as_ptr(),
+            p_command_buffers: ptr::addr_of!(self.command_buffers[self.frame_index]),
             ..Default::default()
         };
 
@@ -1601,9 +1601,9 @@ impl State {
 
         let index = self.swapchain_index as u32;
         let present_info = vk::PresentInfoKHR {
-            p_swapchains: [self.swapchain].as_ptr(),
+            p_swapchains: ptr::addr_of!(self.swapchain),
             swapchain_count: 1,
-            p_wait_semaphores: [self.render_complete_semaphores[self.frame_index]].as_ptr(),
+            p_wait_semaphores: ptr::addr_of!(self.render_complete_semaphores[self.frame_index]),
             wait_semaphore_count: 1,
             p_image_indices: ptr::addr_of!(index),
             ..Default::default()
@@ -1747,7 +1747,7 @@ impl ShaderData {
             p_code: vertex_binary.as_ptr() as *const ffi::c_void,
             code_size: vertex_binary.len(),
             p_name: b"main\0".as_ptr() as *const i8,
-            p_set_layouts: [state.descriptor_layout].as_ptr(),
+            p_set_layouts: ptr::addr_of!(state.descriptor_layout),
             set_layout_count: 1,
             ..Default::default()
         };
@@ -1758,7 +1758,7 @@ impl ShaderData {
             p_code: fragment_binary.as_ptr() as *const ffi::c_void,
             code_size: fragment_binary.len(),
             p_name: b"main\0".as_ptr() as *const i8,
-            p_set_layouts: [state.descriptor_layout].as_ptr(),
+            p_set_layouts: ptr::addr_of!(state.descriptor_layout),
             set_layout_count: 1,
             ..Default::default()
         };
