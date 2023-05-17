@@ -29,8 +29,8 @@ jobs:
            rustup toolchain add nightly
            rustup default nightly
 
-    - name: Install fleet
-      run: cargo install fleet-rs sccache
+#    - name: Install fleet
+#      run: cargo install fleet-rs sccache
 
     - name: Build
       run: cargo build --profile ${{ matrix.build-type }} --verbose --out-dir out -Z unstable-options
