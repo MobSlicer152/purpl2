@@ -1,4 +1,5 @@
 use crate::{engine::rendersystem, platform};
+use ash::vk::Handle;
 use ash::{extensions, vk};
 use log::{debug, error, log, trace};
 use std::rc::Rc;
@@ -395,8 +396,6 @@ pub struct State {
     frame_index: usize,
     resized: bool,
 
-    pub shaders: Vec<rendersystem::Shader>,
-
     last_shader: Option<Arc<rendersystem::Shader>>,
     last_model: Option<Arc<rendersystem::Model>>,
 }
@@ -544,8 +543,8 @@ impl State {
         instance
     }
 
-    fn get_required_device_exts() -> [&'static str; 2] {
-        ["VK_KHR_swapchain", "VK_EXT_shader_object"]
+    fn get_required_device_exts() -> [&'static str; 4] {
+        ["VK_KHR_swapchain", "VK_EXT_extended_dynamic_state", "VK_EXT_vertex_input_dynamic_state", "VK_EXT_shader_object"]
     }
 
     fn get_gpus(
@@ -762,8 +761,14 @@ impl State {
         let device_features = vk::PhysicalDeviceFeatures {
             ..Default::default()
         };
+
+        let shader_object_features = vk::PhysicalDeviceShaderObjectFeaturesEXT {
+            shader_object: vk::TRUE,
+            ..Default::default()
+        };
         let device_13_features = vk::PhysicalDeviceVulkan13Features {
             dynamic_rendering: vk::TRUE,
+            p_next: ptr::addr_of!(shader_object_features) as *mut ffi::c_void,
             ..Default::default()
         };
 
@@ -800,7 +805,7 @@ impl State {
         let graphics_queue = unsafe { device.get_device_queue(gpu.graphics_family_index, 0) };
         let present_queue = unsafe { device.get_device_queue(gpu.compute_family_index, 0) };
         debug!(
-            "Got graphics queue {:#?} and present queue {:#?}",
+            "Got graphics queue {:#?} and compute queue {:#?}",
             graphics_queue, present_queue
         );
 
@@ -1124,6 +1129,12 @@ impl State {
         (depth_image)
     }
 
+    fn destroy_render_targets(&mut self) {
+        debug!("Destroying render target images");
+        debug!("Destroying depth image {:#?}", self.depth_image.handle());
+        self.depth_image.destroy(&self.device, &self.allocator);
+    }
+
     fn create_descriptor_layout(device: &ash::Device) -> vk::DescriptorSetLayout {
         debug!("Creating descriptor set layout");
 
@@ -1140,7 +1151,7 @@ impl State {
             binding_count: 1,
             ..Default::default()
         };
-
+        
         let layout = unsafe {
             vulkan_check!(device.create_descriptor_set_layout(
                 &descriptor_layout_info,
@@ -1151,12 +1162,6 @@ impl State {
         debug!("Created descriptor set layout {layout:#?}");
 
         layout
-    }
-
-    fn destroy_render_targets(&mut self) {
-        debug!("Destroying render target images");
-        debug!("Destroying depth image {:#?}", self.depth_image.handle());
-        self.depth_image.destroy(&self.device, &self.allocator);
     }
 
     fn resize(&mut self) {
@@ -1411,8 +1416,6 @@ impl State {
             resized: false,
             swapchain_index: 0,
 
-            shaders: Vec::new(),
-
             last_shader: None,
             last_model: None,
         };
@@ -1580,11 +1583,11 @@ impl State {
         let submit_info = vk::SubmitInfo {
             p_wait_dst_stage_mask: ptr::addr_of!(wait_stage),
             wait_semaphore_count: 1,
-            p_wait_semaphores: ptr::addr_of!(self.acquire_semaphores[self.frame_index]),
+            p_wait_semaphores: [self.acquire_semaphores[self.frame_index]].as_ptr(),
             signal_semaphore_count: 1,
-            p_signal_semaphores: ptr::addr_of!(self.render_complete_semaphores[self.frame_index]),
+            p_signal_semaphores: [self.render_complete_semaphores[self.frame_index]].as_ptr(),
             command_buffer_count: 1,
-            p_command_buffers: ptr::addr_of!(self.command_buffers[self.frame_index]),
+            p_command_buffers: [self.command_buffers[self.frame_index]].as_ptr(),
             ..Default::default()
         };
 
@@ -1598,9 +1601,9 @@ impl State {
 
         let index = self.swapchain_index as u32;
         let present_info = vk::PresentInfoKHR {
-            p_swapchains: ptr::addr_of!(self.swapchain),
+            p_swapchains: [self.swapchain].as_ptr(),
             swapchain_count: 1,
-            p_wait_semaphores: ptr::addr_of!(self.render_complete_semaphores[self.frame_index]),
+            p_wait_semaphores: [self.render_complete_semaphores[self.frame_index]].as_ptr(),
             wait_semaphore_count: 1,
             p_image_indices: ptr::addr_of!(index),
             ..Default::default()
@@ -1735,6 +1738,7 @@ impl ShaderData {
         vertex_binary: Vec<u8>,
         fragment_binary: Vec<u8>,
     ) -> Result<Self, crate::engine::rendersystem::ShaderError> {
+
         let vertex_info = vk::ShaderCreateInfoEXT {
             flags: vk::ShaderCreateFlagsEXT::LINK_STAGE,
             stage: vk::ShaderStageFlags::VERTEX,
@@ -1743,7 +1747,7 @@ impl ShaderData {
             p_code: vertex_binary.as_ptr() as *const ffi::c_void,
             code_size: vertex_binary.len(),
             p_name: b"main\0".as_ptr() as *const i8,
-            p_set_layouts: ptr::addr_of!(state.descriptor_layout),
+            p_set_layouts: [state.descriptor_layout].as_ptr(),
             set_layout_count: 1,
             ..Default::default()
         };
@@ -1754,7 +1758,7 @@ impl ShaderData {
             p_code: fragment_binary.as_ptr() as *const ffi::c_void,
             code_size: fragment_binary.len(),
             p_name: b"main\0".as_ptr() as *const i8,
-            p_set_layouts: ptr::addr_of!(state.descriptor_layout),
+            p_set_layouts: [state.descriptor_layout].as_ptr(),
             set_layout_count: 1,
             ..Default::default()
         };
@@ -1768,7 +1772,7 @@ impl ShaderData {
             Ok(shaders) => (shaders[0], shaders[1]),
             Err(err) => {
                 error!("Failed to create Vulkan shader {name}: {err}");
-                return Err(crate::engine::rendersystem::ShaderError::Backend(err));
+                return Err(rendersystem::ShaderError::Backend(err));
             }
         };
         

@@ -12,8 +12,6 @@ mod platform;
 
 pub use game::*;
 
-pub use texture;
-
 use clap::Parser;
 use mimalloc::MiMalloc;
 

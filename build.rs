@@ -25,8 +25,6 @@ fn main() {
 
     #[cfg(not(any(macos, ios, xbox)))]
     {
-        use shaderc;
-
         const shader_dir: &'static str = "src/engine/rendersystem/shaders/vulkan/";
         let output_dir = format!("target/{profile}/{GAME_EXECUTABLE_NAME}/shaders/");
 

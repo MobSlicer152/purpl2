@@ -58,7 +58,7 @@ pub struct UniformData {
 
 pub struct RenderTexture {
     name: String,
-    texture: crate::texture::Texture,
+    //texture: crate::texture::Texture,
     //handle: render_impl::TextureData
 }
 
@@ -72,8 +72,10 @@ impl Shader {
     pub fn new(name: &str) -> Result<(), ShaderError> {
         assert!(have_state!() && have_backend!());
         
-        let vertex_path = format!("{}{}{}", crate::engine::GameDirs::shaders(), name, render_impl::ShaderData::vertex_extension());
-        let fragment_path = format!("{}{}{}", crate::engine::GameDirs::shaders(), name, render_impl::ShaderData::fragment_extension());
+        info!("Creating shader {name}");
+
+        let vertex_path = format!("{}{name}{}", crate::engine::GameDirs::shaders(), render_impl::ShaderData::vertex_extension());
+        let fragment_path = format!("{}{name}{}", crate::engine::GameDirs::shaders(), render_impl::ShaderData::fragment_extension());
         let vertex_binary =
             match fs::read(&vertex_path) {
                 Ok(data) => data,
@@ -108,12 +110,13 @@ impl Shader {
             handle,
         }));
 
+        info!("Shader {name} created successfully");
+
         Ok(())
     }
 
     pub fn destroy(&self) {
         self.handle.destroy(get_backend!());
-        get_state!().shaders.remove(&self.name);
     }
 }
 
@@ -147,7 +150,7 @@ pub fn present() {
 
 pub fn shutdown() {
     info!("Render system shutdown started");
-
+    
     get_state!().shaders.iter().for_each(|(_, shader)| { shader.as_ref().unwrap().destroy() });
 
     BACKEND.lock().unwrap().take().unwrap().shutdown();
