@@ -1,6 +1,6 @@
 use log::{error, info};
 use nalgebra::*;
-use std::{fs, io, collections::HashMap, sync::Mutex};
+use std::{fs, io, collections::HashMap, sync::{Arc, Mutex}};
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
 mod vulkan;
@@ -64,8 +64,8 @@ pub struct RenderTexture {
 
 pub struct Material {
     name: String,
-    shader: Shader,
-    texture: RenderTexture,
+    shader: Arc<Shader>,
+    texture: Arc<RenderTexture>,
 }
 
 impl Shader {
