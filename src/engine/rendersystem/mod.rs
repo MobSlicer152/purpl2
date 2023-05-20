@@ -126,9 +126,14 @@ pub trait Renderable {
 
 pub struct Model {
     name: String,
-    //mesh: Mesh,
-    material: Material,
+    material: Arc<Material>,
     //handle: render_impl::ModelData
+}
+
+impl Model {
+    pub fn new(name: String, material: Arc<Material>, object: obj::Obj) -> Result<(), ModelError> {
+        Ok(())
+    }
 }
 
 pub fn init() {

@@ -25,14 +25,14 @@ fn main() {
 
     #[cfg(not(any(macos, ios, xbox)))]
     {
-        const shader_dir: &'static str = "src/engine/rendersystem/shaders/vulkan/";
+        const SHADER_DIR: &'static str = "src/engine/rendersystem/shaders/vulkan/";
         let output_dir = format!("target/{profile}/{GAME_EXECUTABLE_NAME}/shaders/");
 
         fs::create_dir_all(&output_dir).unwrap();
 
         let compiler = shaderc::Compiler::new().unwrap();
 
-        let mut entries = fs::read_dir(shader_dir)
+        let mut entries = fs::read_dir(SHADER_DIR)
             .unwrap()
             .map(|res| res.map(|e| e.path()))
             .collect::<Result<Vec<_>, io::Error>>()
@@ -43,7 +43,7 @@ fn main() {
             let binary_path = entry
                 .to_str()
                 .unwrap()
-                .replace(shader_dir, output_dir.as_str())
+                .replace(SHADER_DIR, output_dir.as_str())
                 + ".spv";
             let binary_meta = fs::metadata(&binary_path);
             // only compile if source has probably changed

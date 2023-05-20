@@ -1,5 +1,4 @@
 use crate::{engine::rendersystem, platform};
-use ash::vk::Handle;
 use ash::{extensions, vk};
 use log::{debug, error, log, trace};
 use std::rc::Rc;

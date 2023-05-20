@@ -28,6 +28,8 @@ fn main() {
     platform::init();
     engine::init(Args::parse());
 
+
+
     engine::rendersystem::Shader::new("basic").unwrap();
 
     while platform::video::update() {
