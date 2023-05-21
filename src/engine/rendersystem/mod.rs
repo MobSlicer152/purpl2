@@ -1,6 +1,6 @@
 use log::{error, info};
 use nalgebra::*;
-use std::{fs, io, collections::HashMap, sync::{Arc, Mutex}};
+use std::{cell::SyncUnsafeCell, collections::HashMap, fs, io, mem, sync::{Arc, Mutex}};
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
 mod vulkan;
@@ -22,8 +22,12 @@ macro_rules! have_backend {
     };
 }
 
+pub type ThingHolder<T> = Arc<SyncUnsafeCell<T>>;
+
 struct State {
-    shaders: HashMap<String, Option<Shader>>
+    shaders: HashMap<String, ThingHolder<Shader>>,
+    models: HashMap<String, ThingHolder<Model>>,
+    materials: HashMap<String, ThingHolder<Material>>,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -49,27 +53,8 @@ pub struct Shader {
     handle: render_impl::ShaderData,
 }
 
-#[repr(C)]
-pub struct UniformData {
-    model: Matrix4<f64>,
-    view: Matrix4<f64>,
-    projection: Matrix4<f64>,
-}
-
-pub struct RenderTexture {
-    name: String,
-    //texture: crate::texture::Texture,
-    //handle: render_impl::TextureData
-}
-
-pub struct Material {
-    name: String,
-    shader: Arc<Shader>,
-    texture: Arc<RenderTexture>,
-}
-
 impl Shader {
-    pub fn new(name: &str) -> Result<(), ShaderError> {
+    pub fn new(name: &str) -> Result<ThingHolder<Self>, ShaderError> {
         assert!(have_state!() && have_backend!());
         
         info!("Creating shader {name}");
@@ -105,34 +90,156 @@ impl Shader {
             }
         };
 
-        get_state!().shaders.insert(String::from(name), Some(Self {
+        let shader = Arc::new(SyncUnsafeCell::new(Self {
             name: String::from(name),
             handle,
         }));
+        get_state!().shaders.insert(String::from(name), shader.clone());
 
         info!("Shader {name} created successfully");
 
-        Ok(())
+        Ok(shader)
     }
 
     pub fn destroy(&self) {
         self.handle.destroy(get_backend!());
     }
+
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+}
+
+#[repr(C)]
+pub struct UniformData {
+    model: Matrix4<f64>,
+    view: Matrix4<f64>,
+    projection: Matrix4<f64>,
+}
+
+pub struct RenderTexture {
+    name: String,
+    //texture: crate::texture::Texture,
+    //handle: render_impl::TextureData
+}
+
+pub struct Material {
+    name: String,
+    shader: ThingHolder<Shader>,
+ //   texture: Arc<RenderTexture>,
+}
+
+impl Material {
+    pub fn new(name: &str, shader: &str) -> Result<ThingHolder<Self>, ()> {
+        let material = Arc::new(SyncUnsafeCell::new(Self {
+            name: String::from(name),
+            shader: match get_state!().shaders.get(&String::from(shader)) {
+                Some(thing) => thing,
+                None => { return Err(()); }
+            }.clone()
+        }));
+        get_state!().materials.insert(String::from(name), material.clone());
+        Ok(material)
+    }
+
+    pub fn name(&self) -> &String {
+        &self.name
+    }
 }
 
 pub trait Renderable {
-    fn render();
+    fn render(&self);
+}
+
+#[derive(PartialEq)]
+pub struct Vertex {
+    position: Vector3<f32>,
+    texture_coordinate: Vector2<f32>,
+    normal: Vector3<f32>
 }
 
 pub struct Model {
     name: String,
-    material: Arc<Material>,
-    //handle: render_impl::ModelData
+    data: Vec<u8>,
+    material: ThingHolder<Material>,
+    handle: render_impl::ModelData
 }
 
 impl Model {
-    pub fn new(name: String, material: Arc<Material>, object: obj::Obj) -> Result<(), ModelError> {
-        Ok(())
+    pub fn new(name: &str, models: Vec<tobj::Model>, material: &str) -> Result<ThingHolder<Self>, ()> {
+        info!("Creating model {name}");
+        
+        // largely based on https://github.com/bwasty/learn-opengl-rs/blob/master/src/model.rs
+        let mut all_vertices = Vec::new();
+        let mut all_indices: Vec<u32> = Vec::new();
+        for model in models {
+            let mut mesh = model.mesh;
+            
+            assert!(!mesh.normals.is_empty() && !mesh.texcoords.is_empty());
+            
+            let vertex_count = mesh.positions.len() / 3;
+            let mut vertices = Vec::with_capacity(vertex_count);
+            let (p, t, n) = (&mesh.positions, &mesh.texcoords, &mesh.normals);
+            for i in 0..vertex_count {
+                let position = Vector3::new(p[i * 3 + 0], p[i * 3 + 1], p[i * 3 + 2]);
+                let texture_coordinate = Vector2::new(t[i * 2 + 0], t[i * 2 + 1]);
+                let normal = Vector3::new(n[i * 3 + 0], n[i * 3 + 1], n[i * 3 + 2]);
+                vertices.push(Vertex {
+                    position,
+                    texture_coordinate,
+                    normal
+                })
+            }
+            
+            all_vertices.append(&mut vertices);
+            all_indices.append(&mut mesh.indices);
+        }
+        
+        let vertices_size = all_vertices.len() * mem::size_of::<Vertex>();
+        let indices_size = all_indices.len() * mem::size_of::<u32>();
+        
+        let mut data = Vec::new();
+        let vertices = all_vertices.into_raw_parts();
+        data.append(&mut unsafe { Vec::from_raw_parts(vertices.0 as *mut u8, vertices_size, vertices_size) });
+        let indices = all_indices.into_raw_parts();
+        data.append(&mut unsafe { Vec::from_raw_parts(indices.0 as *mut u8, indices_size, indices_size) });
+        
+        let handle = render_impl::ModelData::new(get_backend!(), name, vertices_size, indices_size);
+        
+        let model = Arc::new(SyncUnsafeCell::new(Self {
+            name: String::from(name),
+            material: match get_state!().materials.get(&String::from(material)) {
+                Some(thing) => thing,
+                None => { return Err(()); }
+            }.clone(),
+            data,
+            handle
+        }));
+        get_state!().models.insert(String::from(name), model.clone());
+        
+        info!("Created model {name} successfully");
+
+        Ok(model)
+    }
+
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+    
+    pub fn data(&self) -> &Vec<u8> {
+        &self.data
+    }
+    
+    pub fn size(&self) -> u64 {
+        self.data.len() as u64
+    }
+}
+
+impl Renderable for Model {
+    fn render(&self) {
+        if get_backend!().is_in_frame() {
+            get_backend!().render_model(self);
+        }
     }
 }
 
@@ -140,9 +247,19 @@ pub fn init() {
     info!("Render system initialization started");
     *BACKEND.lock().unwrap() = Some(render_impl::State::init());
     *STATE.lock().unwrap() = Some(State {
-        shaders: HashMap::new()
+        shaders: HashMap::new(),
+        models: HashMap::new(),
+        materials: HashMap::new(),
     });
     info!("Render system initialization succeeded");
+}
+
+pub fn load_resources() {
+    if get_backend!().is_initialized() && !get_backend!().is_loaded() {
+        info!("Loading resources");
+        get_backend!().load_resources(&mut get_state!().models);
+        info!("Done loading resources");
+    }
 }
 
 pub fn begin_cmds() {
@@ -153,17 +270,17 @@ pub fn present() {
     get_backend!().present()
 }
 
-pub fn shutdown() {
-    info!("Render system shutdown started");
-    
-    get_state!().shaders.iter().for_each(|(_, shader)| { shader.as_ref().unwrap().destroy() });
-
-    BACKEND.lock().unwrap().take().unwrap().shutdown();
-    info!("Render system shutdown succeeded");
+pub fn unload_resources() {
+    if get_backend!().is_initialized() && get_backend!().is_loaded() {
+        info!("Unloading resources");
+        get_backend!().unload_resources();
+        info!("Done unloading resources");
+    }
 }
 
-impl Renderable for Model {
-    fn render() {
-        //get_state!().render_model()
-    }
+pub fn shutdown() {
+    info!("Render system shutdown started");
+    unload_resources();
+    BACKEND.lock().unwrap().take().unwrap().shutdown();
+    info!("Render system shutdown succeeded");
 }

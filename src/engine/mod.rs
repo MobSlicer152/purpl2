@@ -1,4 +1,5 @@
 pub mod rendersystem;
+use rendersystem::Renderable;
 
 use crate::platform;
 use chrono::Local;
@@ -17,6 +18,8 @@ struct State {
     runtime: i64,
     fps: f64,
     delta: i64,
+
+    model: Option<rendersystem::ThingHolder<rendersystem::Model>>
 }
 
 impl State {
@@ -84,6 +87,10 @@ fn setup_logger() -> Result<(), fern::InitError> {
 pub fn init(args: crate::Args) {
     debug!("{args:#?}");
 
+    if args.wait_for_debugger {
+        while !platform::have_debugger() {}
+    }
+
     for dir in DataDirs::all() {
         if fs::create_dir_all(dir.clone()).is_err() {
             panic!("Failed to create engine data directory {dir}")
@@ -96,13 +103,25 @@ pub fn init(args: crate::Args) {
 
     info!("Engine initialization started");
 
-    *STATE.lock().unwrap() = Some(State {
-        game_dir: args.game,
-        ..Default::default()
-    });
-
     platform::video::init();
     rendersystem::init();
+
+    *STATE.lock().unwrap() = Some(State {
+        game_dir: args.game,
+        model: None,
+        ..Default::default()
+    });
+    
+    let shader = rendersystem::Shader::new("basic").unwrap();
+    let material = rendersystem::Material::new("basic", unsafe { shader.get().as_ref().unwrap() }.name().as_str()).unwrap();
+    let obj = tobj::load_obj(GameDirs::models() + "test.obj", &tobj::LoadOptions {
+        single_index: true,
+        triangulate: true,
+        ..Default::default()
+    }).unwrap().0;
+    get_state!().model = Some(rendersystem::Model::new("test", obj, unsafe { material.get().as_ref().unwrap() }.name().as_str()).unwrap());
+
+    rendersystem::load_resources();
 }
 
 pub fn update() {
@@ -117,6 +136,8 @@ pub fn update() {
     }
 
     rendersystem::begin_cmds();
+    
+    unsafe { get_state!().model.as_ref().unwrap().get().as_ref().unwrap() }.render();
 
     rendersystem::present();
 }
@@ -130,7 +151,6 @@ pub fn shutdown() {
     info!("Engine shutdown succeeded");
 }
 
-use crate::GAME_EXECUTABLE_NAME;
 use crate::GAME_NAME;
 pub struct DataDirs;
 impl DataDirs {
@@ -156,13 +176,17 @@ impl DataDirs {
 pub struct GameDirs;
 impl GameDirs {
     pub fn all() -> Vec<String> {
-        vec![Self::base(), Self::shaders()]
+        vec![Self::base(), Self::models(), Self::shaders()]
     }
 
     pub fn base() -> String {
         format!("{}/", get_state!().game_dir)
     }
 
+    pub fn models() -> String {
+        Self::base() + "models/"
+    }
+    
     pub fn shaders() -> String {
         Self::base() + "shaders/"
     }

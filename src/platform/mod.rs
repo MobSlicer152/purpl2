@@ -19,3 +19,7 @@ pub fn init() {
 pub fn shutdown() {
     unsafe { platform_impl::shutdown() }
 }
+
+pub fn have_debugger() -> bool {
+    unsafe { platform_impl::have_debugger() } 
+}

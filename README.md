@@ -21,9 +21,8 @@ This is a Rust rewrite of [my C engine](https://github.com/MobSlicer152/purpl-en
 
 The engine is/will be made of these components:
 
-- `platform` - Platform abstraction, handles the compiler(s) used for that platform but also OS functions,
-also handles "video" (another Quake 2 idea sort of), through functions that hide most details
-about the underlying window and such.
+- `platform` - Platform abstraction, handles OS functions, also handles "video" (another Quake 2 idea sort of),
+through functions that hide most details about the underlying window and such.
 - `engine` - Currently contains a camera structure and function, a transform structure, and some ECS stuff.
 - `rendersystem` (`engine/rendersystem`) - API-independant frontend for rendering, also inspired a bit by Quake 2.
 - `rendersystem-vk` (`engine/rendersystem/vulkan`) - Vulkan render backend, probably most of the code.
@@ -40,6 +39,7 @@ I heard that Doom Eternal uses thread jobs for everything so I hope to figure ou
 ### Things that need to be changed eventually
 
 - Make video backends more idiomatic by using nested functions or whatever the Rust way is
+- Make my own formats instead of using OBJ and PNG
 
 ### Dependencies
 

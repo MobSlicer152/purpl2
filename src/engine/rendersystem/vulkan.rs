@@ -2,7 +2,7 @@ use crate::{engine::rendersystem, platform};
 use ash::{extensions, vk};
 use log::{debug, error, log, trace};
 use std::rc::Rc;
-use std::{alloc, ffi, mem, ptr, sync::Arc};
+use std::{alloc, cell::SyncUnsafeCell, cmp, collections::HashMap, ffi, mem, ptr, sync::Arc};
 use vk_mem::*;
 
 macro_rules! vulkan_check {
@@ -232,7 +232,6 @@ impl Buffer {
         device: &ash::Device,
         queue: &vk::Queue,
         transfer_pool: &vk::CommandPool,
-        fence: &vk::Fence,
         destination: &Self,
     ) {
         let transfer_buffer = unsafe {
@@ -273,7 +272,7 @@ impl Buffer {
                     p_command_buffers: ptr::addr_of!(transfer_buffer),
                     ..Default::default()
                 }],
-                fence.clone()
+                vk::Fence::null()
             ));
             vulkan_check!(device.queue_wait_idle(queue.clone()));
 
@@ -334,6 +333,14 @@ impl HostBuffer {
         Ok(self_)
     }
 
+    pub unsafe fn read(&self, source: &[u8], offset: vk::DeviceSize) -> usize {
+        let size = cmp::min(self.buffer.size() as usize, source.len());
+
+        (self.address as *mut u8).copy_from(source.as_ptr(), size);
+
+        size
+    }
+
     pub fn destroy(mut self, allocator: &vk_mem::Allocator) {
         unsafe { allocator.unmap_memory(&mut self.buffer.allocation) };
         self.buffer.destroy(allocator);
@@ -392,11 +399,17 @@ pub struct State {
 
     uniform_buffers: Vec<HostBuffer>,
 
+    initialized: bool,
+    loaded: bool,
+
+    in_frame: bool,
     frame_index: usize,
     resized: bool,
 
-    last_shader: Option<Arc<rendersystem::Shader>>,
-    last_model: Option<Arc<rendersystem::Model>>,
+    model_buffer: Option<Buffer>,
+
+    last_shader: Option<String>,
+    last_model: Option<String>,
 }
 
 impl State {
@@ -543,7 +556,12 @@ impl State {
     }
 
     fn get_required_device_exts() -> [&'static str; 4] {
-        ["VK_KHR_swapchain", "VK_EXT_extended_dynamic_state", "VK_EXT_vertex_input_dynamic_state", "VK_EXT_shader_object"]
+        [
+            "VK_KHR_swapchain",
+            "VK_EXT_extended_dynamic_state",
+            "VK_EXT_vertex_input_dynamic_state",
+            "VK_EXT_shader_object",
+        ]
     }
 
     fn get_gpus(
@@ -557,6 +575,8 @@ impl State {
             .into_iter()
             .enumerate()
             .map(|(i, device)| (i + 1, device));
+
+        debug!("Required extensions: {:#?}", Self::get_required_device_exts());
 
         let mut gpus: Vec<GpuInfo> = Vec::new();
         let mut usable_count = 0;
@@ -1150,7 +1170,7 @@ impl State {
             binding_count: 1,
             ..Default::default()
         };
-        
+
         let layout = unsafe {
             vulkan_check!(device.create_descriptor_set_layout(
                 &descriptor_layout_info,
@@ -1411,9 +1431,15 @@ impl State {
             descriptor_sets,
             uniform_buffers,
 
+            initialized: true,
+            loaded: false,
+
+            in_frame: false,
             frame_index: 0,
             resized: false,
             swapchain_index: 0,
+
+            model_buffer: None,
 
             last_shader: None,
             last_model: None,
@@ -1421,6 +1447,57 @@ impl State {
         self_.set_gpu(self_.gpu);
 
         self_
+    }
+
+    pub fn load_resources(&mut self, models: &mut HashMap<String, Arc<SyncUnsafeCell<rendersystem::Model>>>) {
+        if !models.is_empty() {
+            debug!("Creating model buffer");
+            
+            let mut size = 0;
+            models.iter_mut().for_each(|(_, model)| {
+                let model = unsafe { model.get().as_mut().unwrap() };
+                model.handle.offset = size;
+                size += model.size();
+            });
+
+            let transfer_buffer = vulkan_check!(HostBuffer::new(
+                &self.allocator,
+                size,
+                vk::BufferUsageFlags::VERTEX_BUFFER
+                    | vk::BufferUsageFlags::INDEX_BUFFER
+                    | vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+            ));
+
+            models.iter().for_each(|(_, model)| {
+                let model = unsafe { model.get().as_mut().unwrap() };
+                unsafe {
+                    transfer_buffer.read(
+                        model.data(),
+                        model.handle.offset,
+                    )
+                };
+            });
+
+            self.model_buffer = Some(vulkan_check!(Buffer::new(
+                &self.allocator,
+                size,
+                vk::BufferUsageFlags::VERTEX_BUFFER
+                    | vk::BufferUsageFlags::INDEX_BUFFER
+                    | vk::BufferUsageFlags::TRANSFER_DST,
+                vk::MemoryPropertyFlags::empty()
+            )));
+
+            transfer_buffer.buffer().copy(
+                &self.device,
+                &self.compute_queue,
+                &self.transfer_pool,
+                self.model_buffer.as_ref().unwrap(),
+            );
+            transfer_buffer.destroy(&self.allocator);
+        }
+
+        self.loaded = true;
     }
 
     pub fn begin_cmds(&mut self) {
@@ -1534,9 +1611,54 @@ impl State {
             self.device
                 .cmd_begin_rendering(self.command_buffers[self.frame_index], &rendering_info)
         };
+
+        self.in_frame = true;
+    }
+
+    pub fn render_model(&mut self, model: &rendersystem::Model) {
+        if self.last_model.is_none() || self.last_model.as_ref().unwrap() != &model.name {
+            unsafe {
+                self.device.cmd_bind_vertex_buffers(
+                    self.command_buffers[self.frame_index],
+                    0,
+                    &[*self.model_buffer.as_ref().unwrap().handle()],
+                    &[model.handle.offset],
+                );
+                self.device.cmd_bind_index_buffer(
+                    self.command_buffers[self.frame_index],
+                    *self.model_buffer.as_ref().unwrap().handle(),
+                    model.handle.offset + model.handle.vertices_size,
+                    vk::IndexType::UINT32,
+                );
+            }
+            self.last_model = Some(model.name.clone());
+        }
+
+        let shader = unsafe { model.material.get().as_ref().unwrap().shader.get().as_ref().unwrap() };
+        unsafe {
+            self.shader_object_loader.cmd_bind_shaders(
+                self.command_buffers[self.frame_index],
+                &[vk::ShaderStageFlags::VERTEX, vk::ShaderStageFlags::FRAGMENT],
+                &[
+                    shader.handle.vertex_handle,
+                    shader.handle.fragment_handle,
+                ],
+            );
+
+            self.device.cmd_draw_indexed(
+                self.command_buffers[self.frame_index],
+                (model.handle.indices_size / mem::size_of::<u32>() as u64) as u32,
+                1,
+                0,
+                0,
+                0
+            );
+        };
     }
 
     pub fn present(&mut self) {
+        self.in_frame = false;
+
         if self.resized {
             self.resized = false;
             return;
@@ -1625,8 +1747,15 @@ impl State {
         self.frame_index = (self.frame_index + 1) % FRAME_COUNT;
     }
 
+    pub fn unload_resources(&mut self) {
+        self.model_buffer.take().unwrap().destroy(&self.allocator);
+    }
+
     pub fn shutdown(mut self) {
         debug!("Vulkan shutdown started");
+
+        self.loaded = false;
+        self.initialized = false;
 
         debug!("Waiting for device idle");
         unsafe { vulkan_check!(self.device.device_wait_idle()) };
@@ -1721,6 +1850,18 @@ impl State {
 
         old_idx
     }
+
+    pub fn is_initialized(&self) -> bool {
+        self.initialized
+    }
+
+    pub fn is_loaded(&self) -> bool {
+        self.loaded
+    }
+
+    pub fn is_in_frame(&self) -> bool {
+        self.in_frame
+    }
 }
 
 pub type ShaderErrorType = vk::Result;
@@ -1737,7 +1878,6 @@ impl ShaderData {
         vertex_binary: Vec<u8>,
         fragment_binary: Vec<u8>,
     ) -> Result<Self, crate::engine::rendersystem::ShaderError> {
-
         let vertex_info = vk::ShaderCreateInfoEXT {
             flags: vk::ShaderCreateFlagsEXT::LINK_STAGE,
             stage: vk::ShaderStageFlags::VERTEX,
@@ -1774,7 +1914,7 @@ impl ShaderData {
                 return Err(rendersystem::ShaderError::Backend(err));
             }
         };
-        
+
         Ok(Self {
             vertex_handle,
             fragment_handle,
@@ -1799,5 +1939,21 @@ impl ShaderData {
 
     pub fn fragment_extension() -> String {
         String::from(".frag.spv")
+    }
+}
+
+pub struct ModelData {
+    offset: vk::DeviceSize,
+    vertices_size: vk::DeviceSize,
+    indices_size: vk::DeviceSize,
+}
+
+impl ModelData {
+    pub fn new(state: &State, name: &str, vertices_size: usize, indices_size: usize) -> Self {
+        Self {
+            offset: 0,
+            vertices_size: vertices_size as vk::DeviceSize,
+            indices_size: indices_size as vk::DeviceSize,
+        }
     }
 }
