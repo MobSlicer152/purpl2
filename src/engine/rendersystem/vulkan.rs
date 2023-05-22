@@ -702,7 +702,7 @@ impl State {
             let mut p_next = properties2.p_next;
             let mut driver_info_ptr = ptr::null();
             while !p_next.is_null() {
-                let tagged = unsafe { (*(p_next as *mut vk::BaseOutStructure)) };
+                let tagged = unsafe { *(p_next as *mut vk::BaseOutStructure) };
                 if tagged.s_type == vk::StructureType::PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR {
                     driver_info_ptr = p_next;
                     break;
@@ -1089,7 +1089,7 @@ impl State {
         gpu: &GpuInfo,
         device: &ash::Device,
         allocator: &vk_mem::Allocator,
-    ) -> (Image) {
+    ) -> Image {
         debug!("Creating render target images");
 
         let depth_formats = vec![
@@ -1146,7 +1146,7 @@ impl State {
         ));
         debug!("Created depth image {:#?}", depth_image.handle());
 
-        (depth_image)
+        depth_image
     }
 
     fn destroy_render_targets(&mut self) {
@@ -1388,7 +1388,7 @@ impl State {
             &swapchain_extent,
             &swapchain_loader,
         );
-        let (depth_image) = Self::create_render_targets(video, &instance, &gpus[gpu], &device, &allocator);
+        let depth_image = Self::create_render_targets(video, &instance, &gpus[gpu], &device, &allocator);
         let descriptor_layout = Self::create_descriptor_layout(&device);
         let descriptor_pool = Self::create_descriptor_pool(&device);
         let uniform_buffers = Self::allocate_uniform_buffers(&allocator);

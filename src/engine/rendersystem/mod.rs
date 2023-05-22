@@ -4,7 +4,7 @@ use std::{
     cell::SyncUnsafeCell,
     collections::HashMap,
     fs, io, mem,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
