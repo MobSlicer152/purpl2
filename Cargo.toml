@@ -20,6 +20,7 @@ clap = { version = "4.2.7", features = ["derive"] }
 directories = "5.0.0"
 fern = { version = "0.6.2", features = ["colored"] }
 image = "0.24.6"
+legion = "0.4.0"
 log = "0.4"
 mimalloc = "0.1.36"
 nalgebra = "0.32.2"

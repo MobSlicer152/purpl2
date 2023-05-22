@@ -555,11 +555,9 @@ impl State {
         instance
     }
 
-    fn get_required_device_exts() -> [&'static str; 4] {
+    fn get_required_device_exts() -> [&'static str; 2] {
         [
             "VK_KHR_swapchain",
-            "VK_EXT_extended_dynamic_state",
-            "VK_EXT_vertex_input_dynamic_state",
             "VK_EXT_shader_object",
         ]
     }
@@ -576,7 +574,10 @@ impl State {
             .enumerate()
             .map(|(i, device)| (i + 1, device));
 
-        debug!("Required extensions: {:#?}", Self::get_required_device_exts());
+        debug!(
+            "Required extensions: {:#?}",
+            Self::get_required_device_exts()
+        );
 
         let mut gpus: Vec<GpuInfo> = Vec::new();
         let mut usable_count = 0;
@@ -613,9 +614,37 @@ impl State {
                 continue;
             };
 
-            let extension_props = unsafe { instance.enumerate_device_extension_properties(device) };
-            match extension_props {
-                Ok(val) if val.len() >= Self::get_required_device_exts().len() => val,
+            let extension_properties =
+                unsafe { instance.enumerate_device_extension_properties(device) };
+            match extension_properties {
+                Ok(val) if val.len() >= Self::get_required_device_exts().len() => {
+                    debug!("Available extensions:");
+                    let mut required_found_count = 0;
+                    let extensions = Vec::from(Self::get_required_device_exts());
+                    val.iter()
+                        .for_each(|properties| {
+                            let mut name_vec = Vec::from(unsafe { mem::transmute::<[i8; 256], [u8; 256]>(properties.extension_name) });
+                            name_vec.dedup_by(|a, b| *a == 0 && *b == 0);
+                            let name_raw = ffi::CString::from_vec_with_nul(name_vec).unwrap();
+                            let name = name_raw.into_string().unwrap();
+                            if extensions.split_at(required_found_count).1.contains(&name.as_str()) {
+                                debug!("\t{name} (required)");
+                                required_found_count += 1;
+                            } else {
+                                trace!("\t{name}");
+                            }
+                        });
+                    if required_found_count < extensions.len() {
+                        error!(
+                            "Ignoring device {} because it only has {} of the required {} extension(s)",
+                            i,
+                            required_found_count,
+                            extensions.len()
+                        );
+                        continue;
+                    }
+                    val
+                }
                 Ok(val) => {
                     error!(
                         "Ignoring device {} because it has {} extension(s) when {} are required",
@@ -631,10 +660,10 @@ impl State {
                 }
             };
 
-            let surface_caps = unsafe {
+            let surface_capabilities = unsafe {
                 surface_loader.get_physical_device_surface_capabilities(device, *surface)
             };
-            let surface_caps = match surface_caps {
+            let surface_caps = match surface_capabilities {
                 Ok(val) => val,
                 Err(err) => {
                     error!("Failed to get surface capabilities for device {i}: {err}");
@@ -1451,10 +1480,13 @@ impl State {
         self_
     }
 
-    pub fn load_resources(&mut self, models: &mut HashMap<String, Arc<SyncUnsafeCell<rendersystem::Model>>>) {
+    pub fn load_resources(
+        &mut self,
+        models: &mut HashMap<String, Arc<SyncUnsafeCell<rendersystem::Model>>>,
+    ) {
         if !models.is_empty() {
             debug!("Creating model buffer");
-            
+
             let mut size = 0;
             models.iter_mut().for_each(|(_, model)| {
                 let model = unsafe { model.get().as_mut().unwrap() };
@@ -1473,12 +1505,7 @@ impl State {
 
             models.iter().for_each(|(_, model)| {
                 let model = unsafe { model.get().as_mut().unwrap() };
-                unsafe {
-                    transfer_buffer.read(
-                        model.data(),
-                        model.handle.offset,
-                    )
-                };
+                unsafe { transfer_buffer.read(model.data(), model.handle.offset) };
             });
 
             self.model_buffer = Some(vulkan_check!(Buffer::new(
@@ -1636,15 +1663,22 @@ impl State {
             self.last_model = Some(model.name.clone());
         }
 
-        let shader = unsafe { model.material.get().as_ref().unwrap().shader.get().as_ref().unwrap() };
+        let shader = unsafe {
+            model
+                .material
+                .get()
+                .as_ref()
+                .unwrap()
+                .shader
+                .get()
+                .as_ref()
+                .unwrap()
+        };
         unsafe {
             self.shader_object_loader.cmd_bind_shaders(
                 self.command_buffers[self.frame_index],
                 &[vk::ShaderStageFlags::VERTEX, vk::ShaderStageFlags::FRAGMENT],
-                &[
-                    shader.handle.vertex_handle,
-                    shader.handle.fragment_handle,
-                ],
+                &[shader.handle.vertex_handle, shader.handle.fragment_handle],
             );
 
             self.device.cmd_draw_indexed(
@@ -1653,7 +1687,7 @@ impl State {
                 1,
                 0,
                 0,
-                0
+                0,
             );
         };
     }
