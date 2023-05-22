@@ -1,12 +1,10 @@
 pub mod rendersystem;
-use rendersystem::Renderable;
 
 use crate::platform;
 use chrono::Local;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::{debug, info};
-use std::sync::Mutex;
-use std::{env, fs, io};
+use std::{fs, io};
 
 const FRAME_SMOOTHING: f64 = 0.9;
 
@@ -123,7 +121,7 @@ impl State {
         self.render.present();
     }
 
-    pub fn shutdown(self) {
+    pub fn shutdown(mut self) {
         info!("Engine shutdown started");
 
         self.render.shutdown();
