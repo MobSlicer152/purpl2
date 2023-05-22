@@ -1,6 +1,11 @@
 use log::{error, info};
 use nalgebra::*;
-use std::{cell::SyncUnsafeCell, collections::HashMap, fs, io, mem, sync::{Arc, Mutex}};
+use std::{
+    cell::SyncUnsafeCell,
+    collections::HashMap,
+    fs, io, mem,
+    sync::{Arc, Mutex},
+};
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
 mod vulkan;
@@ -10,36 +15,59 @@ mod render_impl {
     pub use crate::engine::rendersystem::vulkan::*;
 }
 
-static BACKEND: Mutex<Option<render_impl::State>> = Mutex::new(None);
-macro_rules! get_backend {
-    () => {
-        BACKEND.lock().unwrap().as_mut().unwrap()
-    };
-}
-macro_rules! have_backend {
-    () => {
-        BACKEND.lock().unwrap().is_some()
-    };
-}
-
 pub type ThingHolder<T> = Arc<SyncUnsafeCell<T>>;
 
-struct State {
+pub struct State {
+    backend: render_impl::State,
     shaders: HashMap<String, ThingHolder<Shader>>,
     models: HashMap<String, ThingHolder<Model>>,
     materials: HashMap<String, ThingHolder<Material>>,
 }
 
-static STATE: Mutex<Option<State>> = Mutex::new(None);
-macro_rules! get_state {
-    () => {
-        STATE.lock().unwrap().as_mut().unwrap()
-    };
-}
-macro_rules! have_state {
-    () => {
-        STATE.lock().unwrap().is_some()
-    };
+impl State {
+    pub fn init(video: &crate::platform::video::State) -> Self {
+        info!("Render system initialization started");
+        let backend = render_impl::State::init(video);
+        info!("Render system initialization succeeded");
+
+        Self {
+            backend,
+            shaders: HashMap::new(),
+            models: HashMap::new(),
+            materials: HashMap::new(),
+        }
+    }
+
+    pub fn load_resources(&mut self) {
+        if self.backend.is_initialized() && !self.backend.is_loaded() {
+            info!("Loading resources");
+            self.backend.load_resources(&mut self.models);
+            info!("Done loading resources");
+        }
+    }
+
+    pub fn begin_cmds(&mut self, video: &crate::platform::video::State) {
+        self.backend.begin_cmds(video)
+    }
+
+    pub fn present(&mut self) {
+        self.backend.present()
+    }
+
+    pub fn unload_resources(&mut self) {
+        if self.backend.is_initialized() && self.backend.is_loaded() {
+            info!("Unloading resources");
+            self.backend.unload_resources();
+            info!("Done unloading resources");
+        }
+    }
+
+    pub fn shutdown(mut self) {
+        info!("Render system shutdown started");
+        self.unload_resources();
+        self.backend.shutdown();
+        info!("Render system shutdown succeeded");
+    }
 }
 
 #[derive(Debug)]
@@ -54,31 +82,35 @@ pub struct Shader {
 }
 
 impl Shader {
-    pub fn new(name: &str) -> Result<ThingHolder<Self>, ShaderError> {
-        assert!(have_state!() && have_backend!());
-        
+    pub fn new(state: &mut crate::engine::State, name: &str) -> Result<ThingHolder<Self>, ShaderError> {
         info!("Creating shader {name}");
 
-        let vertex_path = format!("{}{name}{}", crate::engine::GameDirs::shaders(), render_impl::ShaderData::vertex_extension());
-        let fragment_path = format!("{}{name}{}", crate::engine::GameDirs::shaders(), render_impl::ShaderData::fragment_extension());
-        let vertex_binary =
-            match fs::read(&vertex_path) {
-                Ok(data) => data,
-                Err(err) => {
-                    error!("Failed to read vertex binary {vertex_path} for shader {name}: {err}");
-                    return Err(ShaderError::Io(err));
-                }
-            };
-        let fragment_binary =
-            match fs::read(&fragment_path) {
-                Ok(data) => data,
-                Err(err) => {
-                    error!("Failed to read fragment binary {fragment_path} for shader {name}: {err}");
-                    return Err(ShaderError::Io(err));
-                }
-            };
+        let vertex_path = format!(
+            "{}{name}{}",
+            crate::engine::GameDirs::shaders(state),
+            render_impl::ShaderData::vertex_extension()
+        );
+        let fragment_path = format!(
+            "{}{name}{}",
+            crate::engine::GameDirs::shaders(state),
+            render_impl::ShaderData::fragment_extension()
+        );
+        let vertex_binary = match fs::read(&vertex_path) {
+            Ok(data) => data,
+            Err(err) => {
+                error!("Failed to read vertex binary {vertex_path} for shader {name}: {err}");
+                return Err(ShaderError::Io(err));
+            }
+        };
+        let fragment_binary = match fs::read(&fragment_path) {
+            Ok(data) => data,
+            Err(err) => {
+                error!("Failed to read fragment binary {fragment_path} for shader {name}: {err}");
+                return Err(ShaderError::Io(err));
+            }
+        };
         let handle = match render_impl::ShaderData::new(
-            get_backend!(),
+            &state.render().backend,
             name,
             vertex_binary,
             fragment_binary,
@@ -94,15 +126,15 @@ impl Shader {
             name: String::from(name),
             handle,
         }));
-        get_state!().shaders.insert(String::from(name), shader.clone());
+        state.render().shaders.insert(String::from(name), shader.clone());
 
         info!("Shader {name} created successfully");
 
         Ok(shader)
     }
 
-    pub fn destroy(&self) {
-        self.handle.destroy(get_backend!());
+    pub fn destroy(&self, state: &State) {
+        self.handle.destroy(&state.backend);
     }
 
     pub fn name(&self) -> &String {
@@ -126,19 +158,22 @@ pub struct RenderTexture {
 pub struct Material {
     name: String,
     shader: ThingHolder<Shader>,
- //   texture: Arc<RenderTexture>,
+    //   texture: Arc<RenderTexture>,
 }
 
 impl Material {
-    pub fn new(name: &str, shader: &str) -> Result<ThingHolder<Self>, ()> {
+    pub fn new(state: &mut State, name: &str, shader: &str) -> Result<ThingHolder<Self>, ()> {
         let material = Arc::new(SyncUnsafeCell::new(Self {
             name: String::from(name),
-            shader: match get_state!().shaders.get(&String::from(shader)) {
+            shader: match state.shaders.get(&String::from(shader)) {
                 Some(thing) => thing,
-                None => { return Err(()); }
-            }.clone()
+                None => {
+                    return Err(());
+                }
+            }
+            .clone(),
         }));
-        get_state!().materials.insert(String::from(name), material.clone());
+        state.materials.insert(String::from(name), material.clone());
         Ok(material)
     }
 
@@ -148,35 +183,40 @@ impl Material {
 }
 
 pub trait Renderable {
-    fn render(&self);
+    fn render(&self, state: &mut State);
 }
 
 #[derive(PartialEq)]
 pub struct Vertex {
     position: Vector3<f32>,
     texture_coordinate: Vector2<f32>,
-    normal: Vector3<f32>
+    normal: Vector3<f32>,
 }
 
 pub struct Model {
     name: String,
     data: Vec<u8>,
     material: ThingHolder<Material>,
-    handle: render_impl::ModelData
+    handle: render_impl::ModelData,
 }
 
 impl Model {
-    pub fn new(name: &str, models: Vec<tobj::Model>, material: &str) -> Result<ThingHolder<Self>, ()> {
+    pub fn new(
+        state: &mut State,
+        name: &str,
+        models: Vec<tobj::Model>,
+        material: &str,
+    ) -> Result<ThingHolder<Self>, ()> {
         info!("Creating model {name}");
-        
+
         // largely based on https://github.com/bwasty/learn-opengl-rs/blob/master/src/model.rs
         let mut all_vertices = Vec::new();
         let mut all_indices: Vec<u32> = Vec::new();
         for model in models {
             let mut mesh = model.mesh;
-            
+
             assert!(!mesh.normals.is_empty() && !mesh.texcoords.is_empty());
-            
+
             let vertex_count = mesh.positions.len() / 3;
             let mut vertices = Vec::with_capacity(vertex_count);
             let (p, t, n) = (&mesh.positions, &mesh.texcoords, &mesh.normals);
@@ -187,36 +227,43 @@ impl Model {
                 vertices.push(Vertex {
                     position,
                     texture_coordinate,
-                    normal
+                    normal,
                 })
             }
-            
+
             all_vertices.append(&mut vertices);
             all_indices.append(&mut mesh.indices);
         }
-        
+
         let vertices_size = all_vertices.len() * mem::size_of::<Vertex>();
         let indices_size = all_indices.len() * mem::size_of::<u32>();
-        
+
         let mut data = Vec::new();
         let vertices = all_vertices.into_raw_parts();
-        data.append(&mut unsafe { Vec::from_raw_parts(vertices.0 as *mut u8, vertices_size, vertices_size) });
+        data.append(&mut unsafe {
+            Vec::from_raw_parts(vertices.0 as *mut u8, vertices_size, vertices_size)
+        });
         let indices = all_indices.into_raw_parts();
-        data.append(&mut unsafe { Vec::from_raw_parts(indices.0 as *mut u8, indices_size, indices_size) });
-        
-        let handle = render_impl::ModelData::new(get_backend!(), name, vertices_size, indices_size);
-        
+        data.append(&mut unsafe {
+            Vec::from_raw_parts(indices.0 as *mut u8, indices_size, indices_size)
+        });
+
+        let handle = render_impl::ModelData::new(&state.backend, name, vertices_size, indices_size);
+
         let model = Arc::new(SyncUnsafeCell::new(Self {
             name: String::from(name),
-            material: match get_state!().materials.get(&String::from(material)) {
+            material: match state.materials.get(&String::from(material)) {
                 Some(thing) => thing,
-                None => { return Err(()); }
-            }.clone(),
+                None => {
+                    return Err(());
+                }
+            }
+            .clone(),
             data,
-            handle
+            handle,
         }));
-        get_state!().models.insert(String::from(name), model.clone());
-        
+        state.models.insert(String::from(name), model.clone());
+
         info!("Created model {name} successfully");
 
         Ok(model)
@@ -225,62 +272,20 @@ impl Model {
     pub fn name(&self) -> &String {
         &self.name
     }
-    
+
     pub fn data(&self) -> &Vec<u8> {
         &self.data
     }
-    
+
     pub fn size(&self) -> u64 {
         self.data.len() as u64
     }
 }
 
 impl Renderable for Model {
-    fn render(&self) {
-        if get_backend!().is_in_frame() {
-            get_backend!().render_model(self);
+    fn render(&self, state: &mut State) {
+        if state.backend.is_in_frame() {
+            state.backend.render_model(self);
         }
     }
-}
-
-pub fn init() {
-    info!("Render system initialization started");
-    *BACKEND.lock().unwrap() = Some(render_impl::State::init());
-    *STATE.lock().unwrap() = Some(State {
-        shaders: HashMap::new(),
-        models: HashMap::new(),
-        materials: HashMap::new(),
-    });
-    info!("Render system initialization succeeded");
-}
-
-pub fn load_resources() {
-    if get_backend!().is_initialized() && !get_backend!().is_loaded() {
-        info!("Loading resources");
-        get_backend!().load_resources(&mut get_state!().models);
-        info!("Done loading resources");
-    }
-}
-
-pub fn begin_cmds() {
-    get_backend!().begin_cmds()
-}
-
-pub fn present() {
-    get_backend!().present()
-}
-
-pub fn unload_resources() {
-    if get_backend!().is_initialized() && get_backend!().is_loaded() {
-        info!("Unloading resources");
-        get_backend!().unload_resources();
-        info!("Done unloading resources");
-    }
-}
-
-pub fn shutdown() {
-    info!("Render system shutdown started");
-    unload_resources();
-    BACKEND.lock().unwrap().take().unwrap().shutdown();
-    info!("Render system shutdown succeeded");
 }

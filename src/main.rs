@@ -30,12 +30,12 @@ pub struct Args {
 
 fn main() {
     platform::init();
-    engine::init(Args::parse());
+    let mut engine_state = engine::State::init(Args::parse());
     
-    while platform::video::update() {
-        engine::update();
+    while engine_state.video().update() {
+        engine_state.update();
     }
 
-    engine::shutdown();
+    engine_state.shutdown();
     platform::shutdown();
 }

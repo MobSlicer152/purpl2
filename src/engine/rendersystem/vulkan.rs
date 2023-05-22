@@ -1084,6 +1084,7 @@ impl State {
     }
 
     fn create_render_targets(
+        video: &platform::video::State,
         instance: &ash::Instance,
         gpu: &GpuInfo,
         device: &ash::Device,
@@ -1108,7 +1109,7 @@ impl State {
         }
 
         debug!("Creating depth image");
-        let (width, height) = crate::platform::video::get_size();
+        let (width, height) = video.get_size();
         let depth_image = vulkan_check!(Image::new(
             device,
             allocator,
@@ -1183,7 +1184,7 @@ impl State {
         layout
     }
 
-    fn resize(&mut self) {
+    fn resize(&mut self, video: &platform::video::State) {
         debug!("Recreating swap chain");
 
         debug!("Waiting for device idle");
@@ -1191,7 +1192,7 @@ impl State {
 
         self.destroy_render_targets();
         self.destroy_swapchain();
-        let (width, height) = platform::video::get_size();
+        let (width, height) = video.get_size();
         self.swapchain_extent = vk::Extent2D { width, height };
         (self.swapchain, self.swapchain_images, self.swapchain_views) = Self::create_swapchain(
             &self.device,
@@ -1203,6 +1204,7 @@ impl State {
             &self.swapchain_loader,
         );
         (self.depth_image) = Self::create_render_targets(
+            video,
             &self.instance,
             &self.gpus[self.gpu],
             &self.device,
@@ -1348,7 +1350,7 @@ impl State {
         descriptor_sets
     }
 
-    pub fn init() -> Self {
+    pub fn init(video: &platform::video::State) -> Self {
         debug!("Vulkan initialization started");
 
         debug!("Loading Vulkan library");
@@ -1356,7 +1358,7 @@ impl State {
 
         let instance = Self::create_instance(&entry);
         let surface_loader = extensions::khr::Surface::new(&entry, &instance);
-        let surface = crate::platform::video::create_vulkan_surface(
+        let surface = video.create_vulkan_surface(
             &entry,
             &instance,
             Some(&State::get_allocation_callbacks()),
@@ -1371,7 +1373,7 @@ impl State {
         let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(&device);
         let surface_format = Self::choose_surface_format(&gpus[gpu]);
         let present_mode = Self::choose_present_mode(&gpus[gpu]);
-        let video_size = crate::platform::video::get_size();
+        let video_size = video.get_size();
         let swapchain_extent = vk::Extent2D {
             width: video_size.0,
             height: video_size.1,
@@ -1386,7 +1388,7 @@ impl State {
             &swapchain_extent,
             &swapchain_loader,
         );
-        let (depth_image) = Self::create_render_targets(&instance, &gpus[gpu], &device, &allocator);
+        let (depth_image) = Self::create_render_targets(video, &instance, &gpus[gpu], &device, &allocator);
         let descriptor_layout = Self::create_descriptor_layout(&device);
         let descriptor_pool = Self::create_descriptor_pool(&device);
         let uniform_buffers = Self::allocate_uniform_buffers(&allocator);
@@ -1500,7 +1502,7 @@ impl State {
         self.loaded = true;
     }
 
-    pub fn begin_cmds(&mut self) {
+    pub fn begin_cmds(&mut self, video: &platform::video::State) {
         unsafe {
             vulkan_check!(self.device.wait_for_fences(
                 &[self.fences[self.frame_index]],
@@ -1524,7 +1526,7 @@ impl State {
             }
         };
         if self.resized {
-            self.resize();
+            self.resize(video);
             return;
         }
 
