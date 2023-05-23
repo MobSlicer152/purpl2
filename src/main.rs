@@ -25,13 +25,13 @@ pub struct Args {
     #[arg(short, long, default_value_t = String::from(GAME_EXECUTABLE_NAME.clone()))]
     game: String,
     #[arg(short, long, default_value_t = false)]
-    wait_for_debugger: bool
+    wait_for_debugger: bool,
 }
 
 fn main() {
     platform::init();
     let mut engine_state = engine::State::init(Args::parse());
-    
+
     while engine_state.video().update() {
         engine_state.update();
     }

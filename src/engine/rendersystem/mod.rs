@@ -1,11 +1,6 @@
 use log::{error, info};
 use nalgebra::*;
-use std::{
-    cell::SyncUnsafeCell,
-    collections::HashMap,
-    fs, io, mem,
-    sync::Arc,
-};
+use std::{cell::SyncUnsafeCell, collections::HashMap, fs, io, mem, sync::Arc};
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
 mod vulkan;
@@ -82,7 +77,10 @@ pub struct Shader {
 }
 
 impl Shader {
-    pub fn new(state: &mut crate::engine::State, name: &str) -> Result<ThingHolder<Self>, ShaderError> {
+    pub fn new(
+        state: &mut crate::engine::State,
+        name: &str,
+    ) -> Result<ThingHolder<Self>, ShaderError> {
         info!("Creating shader {name}");
 
         let vertex_path = format!(
@@ -126,7 +124,10 @@ impl Shader {
             name: String::from(name),
             handle,
         }));
-        state.render().shaders.insert(String::from(name), shader.clone());
+        state
+            .render()
+            .shaders
+            .insert(String::from(name), shader.clone());
 
         info!("Shader {name} created successfully");
 
@@ -221,9 +222,9 @@ impl Model {
             let mut vertices = Vec::with_capacity(vertex_count);
             let (p, t, n) = (&mesh.positions, &mesh.texcoords, &mesh.normals);
             for i in 0..vertex_count {
-                let position = Vector3::new(p[i * 3 + 0], p[i * 3 + 1], p[i * 3 + 2]);
-                let texture_coordinate = Vector2::new(t[i * 2 + 0], t[i * 2 + 1]);
-                let normal = Vector3::new(n[i * 3 + 0], n[i * 3 + 1], n[i * 3 + 2]);
+                let position = Vector3::new(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]);
+                let texture_coordinate = Vector2::new(t[i * 2], t[i * 2 + 1]);
+                let normal = Vector3::new(n[i * 3], n[i * 3 + 1], n[i * 3 + 2]);
                 vertices.push(Vertex {
                     position,
                     texture_coordinate,

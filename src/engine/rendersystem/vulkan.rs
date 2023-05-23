@@ -102,21 +102,13 @@ impl Image {
     ) -> Result<Self, vk::Result> {
         create_info.format = format;
         let result = unsafe { allocator.create_image(create_info, allocation_info) };
-        if result.is_err() {
-            return Err(result.unwrap_err());
-        }
-
-        let (handle, allocation) = result.unwrap();
+        let (handle, allocation) = result?;
         view_info.image = handle;
         view_info.format = format;
 
         let view = unsafe {
-            device.create_image_view(view_info, Some(&State::get_allocation_callbacks()))
+            device.create_image_view(view_info, Some(&State::get_allocation_callbacks()))?
         };
-        if view.is_err() {
-            return Err(view.unwrap_err());
-        }
-        let view = view.unwrap();
 
         Ok(Self {
             handle,
@@ -136,7 +128,7 @@ impl Image {
     pub fn choose_fmt(
         instance: &ash::Instance,
         gpu: &GpuInfo,
-        formats: &Vec<vk::Format>,
+        formats: &[vk::Format],
         tiling: vk::ImageTiling,
         required_features: vk::FormatFeatureFlags,
     ) -> vk::Format {
@@ -215,11 +207,7 @@ impl Buffer {
             )
         };
 
-        if result.is_err() {
-            return Err(result.unwrap_err());
-        }
-
-        let (handle, allocation) = result.unwrap();
+        let (handle, allocation) = result?;
         Ok(Self {
             handle,
             allocation,
@@ -238,7 +226,7 @@ impl Buffer {
             vulkan_check!(
                 device.allocate_command_buffers(&vk::CommandBufferAllocateInfo {
                     level: vk::CommandBufferLevel::PRIMARY,
-                    command_pool: transfer_pool.clone(),
+                    command_pool: *transfer_pool,
                     command_buffer_count: FRAME_COUNT as u32,
                     ..Default::default()
                 })
@@ -266,7 +254,7 @@ impl Buffer {
 
             vulkan_check!(device.end_command_buffer(transfer_buffer));
             vulkan_check!(device.queue_submit(
-                queue.clone(),
+                *queue,
                 &[vk::SubmitInfo {
                     command_buffer_count: 1,
                     p_command_buffers: ptr::addr_of!(transfer_buffer),
@@ -274,9 +262,9 @@ impl Buffer {
                 }],
                 vk::Fence::null()
             ));
-            vulkan_check!(device.queue_wait_idle(queue.clone()));
+            vulkan_check!(device.queue_wait_idle(*queue));
 
-            device.free_command_buffers(transfer_pool.clone(), &[transfer_buffer]);
+            device.free_command_buffers(*transfer_pool, &[transfer_buffer]);
         }
     }
 
@@ -556,10 +544,7 @@ impl State {
     }
 
     fn get_required_device_exts() -> [&'static str; 2] {
-        [
-            "VK_KHR_swapchain",
-            "VK_EXT_shader_object",
-        ]
+        ["VK_KHR_swapchain", "VK_EXT_shader_object"]
     }
 
     fn get_gpus(
@@ -621,19 +606,24 @@ impl State {
                     debug!("Available extensions:");
                     let mut required_found_count = 0;
                     let extensions = Vec::from(Self::get_required_device_exts());
-                    val.iter()
-                        .for_each(|properties| {
-                            let mut name_vec = Vec::from(unsafe { mem::transmute::<[i8; 256], [u8; 256]>(properties.extension_name) });
-                            name_vec.dedup_by(|a, b| *a == 0 && *b == 0);
-                            let name_raw = ffi::CString::from_vec_with_nul(name_vec).unwrap();
-                            let name = name_raw.into_string().unwrap();
-                            if extensions.split_at(required_found_count).1.contains(&name.as_str()) {
-                                debug!("\t{name} (required)");
-                                required_found_count += 1;
-                            } else {
-                                trace!("\t{name}");
-                            }
+                    for properties in &val {
+                        let mut name_vec = Vec::from(unsafe {
+                            mem::transmute::<[i8; 256], [u8; 256]>(properties.extension_name)
                         });
+                        name_vec.dedup_by(|a, b| *a == 0 && *b == 0);
+                        let name_raw = ffi::CString::from_vec_with_nul(name_vec).unwrap();
+                        let name = name_raw.into_string().unwrap();
+                        if extensions
+                            .split_at(required_found_count)
+                            .1
+                            .contains(&name.as_str())
+                        {
+                            debug!("\t{name} (required)");
+                            required_found_count += 1;
+                        } else {
+                            trace!("\t{name}");
+                        }
+                    }
                     if required_found_count < extensions.len() {
                         error!(
                             "Ignoring device {} because it only has {} of the required {} extension(s)",
@@ -641,6 +631,7 @@ impl State {
                             required_found_count,
                             extensions.len()
                         );
+                        error!("Extensions: {extensions:?}");
                         continue;
                     }
                     val
@@ -748,6 +739,7 @@ impl State {
 
             debug!("Device {i}:");
             debug!("\tName: {name}");
+
             trace!("\tDriver information:\n{driver_info:#?}");
             debug!("\tScore: {score}");
             debug!("\tType: {:#?}", properties.device_type);
@@ -783,6 +775,7 @@ impl State {
 
     fn create_device(
         instance: &ash::Instance,
+
         gpu: &GpuInfo,
     ) -> (ash::Device, vk::Queue, vk::Queue) {
         debug!("Creating logical device");
@@ -836,6 +829,7 @@ impl State {
             pp_enabled_extension_names: extensions_raw.as_ptr(),
             enabled_extension_count: extensions_raw.len() as u32,
             p_next: ptr::addr_of!(device_13_features) as *const ffi::c_void,
+
             ..Default::default()
         };
 
@@ -946,7 +940,7 @@ impl State {
             vulkan_check!(
                 device.allocate_command_buffers(&vk::CommandBufferAllocateInfo {
                     level: vk::CommandBufferLevel::PRIMARY,
-                    command_pool: cmd_pool.clone(),
+                    command_pool: *cmd_pool,
                     command_buffer_count: FRAME_COUNT as u32,
                     ..Default::default()
                 })
@@ -1164,7 +1158,6 @@ impl State {
                     base_array_layer: 0,
                     layer_count: 1,
                     aspect_mask: vk::ImageAspectFlags::DEPTH,
-                    ..Default::default()
                 },
                 ..Default::default()
             },
@@ -1328,17 +1321,17 @@ impl State {
         device: &ash::Device,
         layout: &vk::DescriptorSetLayout,
         pool: &vk::DescriptorPool,
-        uniform_buffers: &Vec<HostBuffer>,
+        uniform_buffers: &[HostBuffer],
     ) -> Vec<vk::DescriptorSet> {
         debug!("Allocating {FRAME_COUNT} descriptor sets");
 
         let mut layouts = Vec::new();
-        layouts.resize_with(3, || layout.clone());
+        layouts.resize_with(3, || *layout);
 
         let descriptor_sets = unsafe {
             vulkan_check!(
                 device.allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
-                    descriptor_pool: pool.clone(),
+                    descriptor_pool: *pool,
                     descriptor_set_count: FRAME_COUNT as u32,
                     p_set_layouts: layouts.as_ptr(),
                     ..Default::default()
@@ -1352,7 +1345,7 @@ impl State {
             let info = vk::DescriptorBufferInfo {
                 offset: 0,
                 range: mem::size_of::<rendersystem::UniformData>() as u64,
-                buffer: uniform_buffers[i].buffer().handle().clone(),
+                buffer: *uniform_buffers[i].buffer().handle(),
             };
             i += 1;
 
@@ -1417,7 +1410,8 @@ impl State {
             &swapchain_extent,
             &swapchain_loader,
         );
-        let depth_image = Self::create_render_targets(video, &instance, &gpus[gpu], &device, &allocator);
+        let depth_image =
+            Self::create_render_targets(video, &instance, &gpus[gpu], &device, &allocator);
         let descriptor_layout = Self::create_descriptor_layout(&device);
         let descriptor_pool = Self::create_descriptor_pool(&device);
         let uniform_buffers = Self::allocate_uniform_buffers(&allocator);
@@ -1612,7 +1606,7 @@ impl State {
             ..Default::default()
         };
         let depth_attachment = vk::RenderingAttachmentInfo {
-            image_view: self.depth_image.view().clone(),
+            image_view: *self.depth_image.view(),
             image_layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
             load_op: vk::AttachmentLoadOp::CLEAR,
             store_op: vk::AttachmentStoreOp::STORE,
