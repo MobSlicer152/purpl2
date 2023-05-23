@@ -23,7 +23,7 @@ fn main() {
         ],
     );
 
-    #[cfg(not(any(macos, ios, xbox)))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "xbox")))]
     {
         const SHADER_DIR: &'static str = "src/engine/rendersystem/shaders/vulkan/";
         let output_dir = format!("target/{profile}/{GAME_EXECUTABLE_NAME}/shaders/");

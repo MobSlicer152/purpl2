@@ -21,5 +21,5 @@ pub fn shutdown() {
 }
 
 pub fn have_debugger() -> bool {
-    unsafe { platform_impl::have_debugger() } 
+    unsafe { platform_impl::have_debugger() }
 }

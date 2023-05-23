@@ -17,7 +17,7 @@ pub struct State {
     delta: i64,
 
     video: platform::video::State,
-    render: rendersystem::State
+    render: rendersystem::State,
 }
 
 impl State {
@@ -91,7 +91,7 @@ impl State {
             fps: 0.0,
             delta: 0,
             video,
-            render
+            render,
         }
     }
 
