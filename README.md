@@ -12,8 +12,7 @@ Use Cargo.
 
 ### System requirements
 
-You need a GPU driver with support for Vulkan 1.3 and the `VK_EXT_shader_object` extension.
-Currently, that means a beta driver, but you can use the instructions [here](https://github.com/KhronosGroup/Vulkan-ExtensionLayer/blob/main/docs/shader_object_layer.md).
+You need a GPU driver with support for Vulkan 1.3.
 
 ### Interesting stuff I guess
 

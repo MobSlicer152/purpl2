@@ -543,8 +543,9 @@ impl State {
         instance
     }
 
-    fn get_required_device_exts() -> [&'static str; 2] {
-        ["VK_KHR_swapchain", "VK_EXT_shader_object"]
+    const fn get_required_device_extensions() -> &'static [&'static str] {
+        const EXTENSIONS: &[&'static str] = &["VK_KHR_swapchain"];
+        EXTENSIONS
     }
 
     fn get_gpus(
@@ -561,7 +562,7 @@ impl State {
 
         debug!(
             "Required extensions: {:#?}",
-            Self::get_required_device_exts()
+            Self::get_required_device_extensions()
         );
 
         let mut gpus: Vec<GpuInfo> = Vec::new();
@@ -602,10 +603,10 @@ impl State {
             let extension_properties =
                 unsafe { instance.enumerate_device_extension_properties(device) };
             match extension_properties {
-                Ok(val) if val.len() >= Self::get_required_device_exts().len() => {
+                Ok(val) if val.len() >= Self::get_required_device_extensions().len() => {
                     debug!("Available extensions:");
                     let mut required_found_count = 0;
-                    let extensions = Vec::from(Self::get_required_device_exts());
+                    let extensions = Vec::from(Self::get_required_device_extensions());
                     for properties in &val {
                         let mut name_vec = Vec::from(unsafe {
                             mem::transmute::<[i8; 256], [u8; 256]>(properties.extension_name)
@@ -641,7 +642,7 @@ impl State {
                         "Ignoring device {} because it has {} extension(s) when {} are required",
                         i,
                         val.len(),
-                        Self::get_required_device_exts().len()
+                        Self::get_required_device_extensions().len()
                     );
                     continue;
                 }
@@ -813,7 +814,7 @@ impl State {
             ..Default::default()
         };
 
-        let extensions_cstr: Vec<ffi::CString> = Self::get_required_device_exts()
+        let extensions_cstr: Vec<ffi::CString> = Self::get_required_device_extensions()
             .iter()
             .map(|extension_name| ffi::CString::new(*extension_name).unwrap())
             .collect();
@@ -880,13 +881,13 @@ impl State {
         };
         let mut acquire_semaphores = Vec::new();
         let mut complete_semaphores = Vec::new();
-        acquire_semaphores.resize_with(3, || unsafe {
+        acquire_semaphores.resize_with(FRAME_COUNT, || unsafe {
             vulkan_check!(device.create_semaphore(
                 &semaphore_create_info,
                 Some(&State::get_allocation_callbacks())
             ))
         });
-        complete_semaphores.resize_with(3, || unsafe {
+        complete_semaphores.resize_with(FRAME_COUNT, || unsafe {
             vulkan_check!(device.create_semaphore(
                 &semaphore_create_info,
                 Some(&State::get_allocation_callbacks())
@@ -1813,6 +1814,7 @@ impl State {
 
             self.destroy_render_targets();
             self.destroy_swapchain();
+
             debug!("Destroying {} semaphores", FRAME_COUNT * 2);
             self.acquire_semaphores.iter().for_each(|semaphore| {
                 self.device
@@ -1829,10 +1831,6 @@ impl State {
             self.fences.iter().for_each(|fence| {
                 self.device
                     .destroy_fence(*fence, Some(&State::get_allocation_callbacks()))
-            });
-            self.acquire_semaphores.iter().for_each(|semaphore| {
-                self.device
-                    .destroy_semaphore(*semaphore, Some(&State::get_allocation_callbacks()))
             });
             debug!("Destroying transfer command pool {:#?}", self.transfer_pool);
             self.device
@@ -1897,8 +1895,7 @@ impl State {
 pub type ShaderErrorType = vk::Result;
 
 pub struct ShaderData {
-    vertex_handle: vk::ShaderEXT,
-    fragment_handle: vk::ShaderEXT,
+    pipeline: vk::Pipeline,
 }
 
 impl ShaderData {
@@ -1908,60 +1905,9 @@ impl ShaderData {
         vertex_binary: Vec<u8>,
         fragment_binary: Vec<u8>,
     ) -> Result<Self, crate::engine::rendersystem::ShaderError> {
-        let vertex_info = vk::ShaderCreateInfoEXT {
-            flags: vk::ShaderCreateFlagsEXT::LINK_STAGE,
-            stage: vk::ShaderStageFlags::VERTEX,
-            next_stage: vk::ShaderStageFlags::FRAGMENT,
-            code_type: vk::ShaderCodeTypeEXT::SPIRV,
-            p_code: vertex_binary.as_ptr() as *const ffi::c_void,
-            code_size: vertex_binary.len(),
-            p_name: b"main\0".as_ptr() as *const i8,
-            p_set_layouts: ptr::addr_of!(state.descriptor_layout),
-            set_layout_count: 1,
-            ..Default::default()
-        };
-        let fragment_info = vk::ShaderCreateInfoEXT {
-            flags: vk::ShaderCreateFlagsEXT::LINK_STAGE,
-            stage: vk::ShaderStageFlags::FRAGMENT,
-            code_type: vk::ShaderCodeTypeEXT::SPIRV,
-            p_code: fragment_binary.as_ptr() as *const ffi::c_void,
-            code_size: fragment_binary.len(),
-            p_name: b"main\0".as_ptr() as *const i8,
-            p_set_layouts: ptr::addr_of!(state.descriptor_layout),
-            set_layout_count: 1,
-            ..Default::default()
-        };
-
-        let (vertex_handle, fragment_handle) = match unsafe {
-            state.shader_object_loader.create_shaders(
-                &[vertex_info, fragment_info],
-                Some(&State::get_allocation_callbacks()),
-            )
-        } {
-            Ok(shaders) => (shaders[0], shaders[1]),
-            Err(err) => {
-                error!("Failed to create Vulkan shader {name}: {err}");
-                return Err(rendersystem::ShaderError::Backend(err));
-            }
-        };
-
-        Ok(Self {
-            vertex_handle,
-            fragment_handle,
-        })
     }
 
-    pub fn destroy(&self, backend: &State) {
-        unsafe {
-            backend
-                .shader_object_loader
-                .destroy_shader(self.vertex_handle, Some(&State::get_allocation_callbacks()));
-            backend.shader_object_loader.destroy_shader(
-                self.fragment_handle,
-                Some(&State::get_allocation_callbacks()),
-            );
-        }
-    }
+    pub fn destroy(&self, backend: &State) {}
 
     pub fn vertex_extension() -> String {
         String::from(".vert.spv")
