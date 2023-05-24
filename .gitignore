@@ -3,3 +3,5 @@
 /out
 **/fleet.toml
 **/.cargo
+*.aps
+RC*

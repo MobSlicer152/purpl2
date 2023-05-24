@@ -381,6 +381,8 @@ pub struct State {
 
     depth_image: Image,
 
+    pipeline_layout: vk::PipelineLayout,
+
     descriptor_layout: vk::DescriptorSetLayout,
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets: Vec<vk::DescriptorSet>,
@@ -740,7 +742,6 @@ impl State {
 
             debug!("Device {i}:");
             debug!("\tName: {name}");
-
             trace!("\tDriver information:\n{driver_info:#?}");
             debug!("\tScore: {score}");
             debug!("\tType: {:#?}", properties.device_type);
@@ -1207,6 +1208,10 @@ impl State {
         layout
     }
 
+    fn create_pipeline_layout(device: &ash::Device) -> vk::PipelineLayout {
+
+    }
+
     fn resize(&mut self, video: &platform::video::State) {
         debug!("Recreating swap chain");
 
@@ -1670,11 +1675,7 @@ impl State {
                 .unwrap()
         };
         unsafe {
-            self.shader_object_loader.cmd_bind_shaders(
-                self.command_buffers[self.frame_index],
-                &[vk::ShaderStageFlags::VERTEX, vk::ShaderStageFlags::FRAGMENT],
-                &[shader.handle.vertex_handle, shader.handle.fragment_handle],
-            );
+            self.device.cmd_bind_descriptor_sets()
 
             self.device.cmd_draw_indexed(
                 self.command_buffers[self.frame_index],
@@ -1905,6 +1906,7 @@ impl ShaderData {
         vertex_binary: Vec<u8>,
         fragment_binary: Vec<u8>,
     ) -> Result<Self, crate::engine::rendersystem::ShaderError> {
+
     }
 
     pub fn destroy(&self, backend: &State) {}

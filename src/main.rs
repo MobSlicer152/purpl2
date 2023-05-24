@@ -1,7 +1,7 @@
 #![cfg_attr(
     all(
         windows,
-        not(any(build = "debug", all(not(build = "debug"), feature = "release_log")))
+        not(any(build = "debug", feature = "release_log"))
     ),
     windows_subsystem = "windows"
 )]
