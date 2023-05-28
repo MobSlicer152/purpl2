@@ -116,7 +116,7 @@ impl State {
             self.start_time = chrono::Local::now().timestamp();
         }
 
-        self.render.begin_cmds(&self.video);
+        self.render.begin_commands(&self.video);
 
         self.render.present();
     }

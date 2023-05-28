@@ -1,3 +1,4 @@
+#[cfg(not(xbox))]
 use ash::{extensions, vk};
 use log::{debug, info};
 use std::{ffi, mem, ptr};
@@ -170,8 +171,10 @@ impl State {
 
         (window, title, width, height)
     }
+}
 
-    pub fn init() -> Self {
+impl super::super::video::VideoBackend for State {
+    fn init() -> Self {
         info!("Windows video initialization started");
 
         let (window, title, width, height) = unsafe {
@@ -193,7 +196,7 @@ impl State {
         }
     }
 
-    pub fn update(&mut self) -> bool {
+    fn update(&mut self) -> bool {
         unsafe {
             let mut msg: MSG = mem::zeroed();
             SetWindowLongPtrA(
@@ -220,7 +223,7 @@ impl State {
         !self.closed
     }
 
-    pub fn shutdown(&self) {
+    fn shutdown(self) {
         info!("Windows video shutdown started");
 
         debug!("Destroying window");
@@ -229,22 +232,26 @@ impl State {
         info!("Windows video shutdown succeeded");
     }
 
-    pub fn get_size(&self) -> (u32, u32) {
+    fn get_size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
-    pub fn resized(&mut self) -> bool {
+    fn resized(&mut self) -> bool {
         let ret = self.resized;
         self.resized = false;
         ret
     }
 
-    pub fn focused(&self) -> bool {
+    fn focused(&self) -> bool {
         self.focused
     }
 
+    fn get_handle(&self) -> usize {
+        self.window as usize
+    }
+
     #[cfg(not(xbox))]
-    pub fn create_vulkan_surface(
+    fn create_vulkan_surface(
         &self,
         entry: &ash::Entry,
         instance: &ash::Instance,

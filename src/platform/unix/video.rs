@@ -23,8 +23,8 @@ fn get_xcb_atom(connection: &xcb::Connection, name: &str) -> x::Atom {
     connection.wait_for_reply(reply).unwrap().atom()
 }
 
-impl State {
-    pub fn init() -> Self {
+impl super::super::video::VideoBackend for State {
+    fn init() -> Self {
         info!("XCB video initialization started");
 
         let (connection, screen_num) = xcb::Connection::connect(None).unwrap();
@@ -107,7 +107,7 @@ impl State {
         }
     }
 
-    pub fn update(&mut self) -> bool {
+    fn update(&mut self) -> bool {
         if let Ok(Some(xcb::Event::X(event))) = self.connection.poll_for_event() {
             match event {
                 x::Event::ConfigureNotify(ev) => {
@@ -146,7 +146,7 @@ impl State {
         !self.closed
     }
 
-    pub fn shutdown(&mut self) {
+    fn shutdown(&mut self) {
         info!("XCB video shutdown started");
 
         debug!("Destroying window");
@@ -157,21 +157,25 @@ impl State {
         info!("XCB video shutdown succeeded");
     }
 
-    pub fn get_size(&self) -> (u32, u32) {
+    fn get_size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
-    pub fn resized(&mut self) -> bool {
+    fn resized(&mut self) -> bool {
         let ret = self.resized;
         self.resized = false;
         ret
     }
 
-    pub fn focused(&self) -> bool {
+    fn focused(&self) -> bool {
         self.focused
     }
 
-    pub fn create_vulkan_surface(
+    fn get_handle(&self) -> usize {
+        self.
+    }
+
+    fn create_vulkan_surface(
         &self,
         entry: &ash::Entry,
         instance: &ash::Instance,
