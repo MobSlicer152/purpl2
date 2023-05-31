@@ -8,7 +8,7 @@ Use Cargo.
 
 ### Build requirements
 
-[Install Rust and its dependencies.](https://www.rust-lang.org/tools/install)
+[Install Rust `nightly` and its dependencies.](https://www.rust-lang.org/tools/install)
 
 ### System requirements
 
