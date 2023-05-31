@@ -175,7 +175,7 @@ impl State {
 }
 
 impl super::super::video::VideoBackend for State {
-    fn init(&self) -> Box<dyn super::super::video::VideoBackend> {
+    fn init() -> Box<dyn super::super::video::VideoBackend> {
         info!("Windows video initialization started");
 
         let (window, title, width, height) = unsafe {

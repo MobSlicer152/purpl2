@@ -81,7 +81,7 @@ impl State {
 
         info!("Engine initialization started");
 
-        let video = platform::video::State::default().init();
+        let video = platform::video::State::init();
         let render = rendersystem::State::init(&video, args.render_api);
 
         Self {

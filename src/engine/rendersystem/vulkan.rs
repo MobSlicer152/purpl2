@@ -1384,16 +1384,8 @@ impl State {
     }
 }
 
-impl Default for State {
-    // ONLY EXISTS SO TRAIT CAN BORROW SELF FOR INIT, DO NOT USE FOR ANYTHING ELSE
-    #[ignore = "invalid_value"]
-    fn default() -> Self {
-        unsafe { mem::zeroed::<Self>() }
-    }
-}
-
 impl rendersystem::RenderBackend for State {
-    fn init(&self, video: &Box<dyn platform::video::VideoBackend>) -> Box<dyn rendersystem::RenderBackend> {
+    fn init(video: &Box<dyn platform::video::VideoBackend>) -> Box<dyn rendersystem::RenderBackend> {
         debug!("Vulkan initialization started");
 
         debug!("Loading Vulkan library");

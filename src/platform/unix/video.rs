@@ -25,7 +25,7 @@ fn get_xcb_atom(connection: &xcb::Connection, name: &str) -> x::Atom {
 }
 
 impl super::super::video::VideoBackend for State {
-    fn init() -> Self {
+    fn init() -> Box<dyn super::super::video::Backend> {
         info!("XCB video initialization started");
 
         let (connection, screen_num) = xcb::Connection::connect(None).unwrap();
@@ -96,7 +96,7 @@ impl super::super::video::VideoBackend for State {
 
         info!("XCB video initialization succeeded");
 
-        State {
+        Box::new(Self {
             connection,
             window,
             title,
@@ -105,7 +105,7 @@ impl super::super::video::VideoBackend for State {
             resized: false,
             focused: false,
             closed: false,
-        }
+        })
     }
 
     fn update(&mut self) -> bool {

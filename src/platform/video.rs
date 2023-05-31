@@ -2,10 +2,12 @@
 use ash::vk;
 
 pub trait VideoBackend {
-    fn init(&self) -> Box<dyn VideoBackend>;
+    fn init() -> Box<dyn VideoBackend>
+    where
+        Self: Sized;
     fn update(&mut self) -> bool;
     fn shutdown(&mut self);
-    
+
     fn get_size(&self) -> (u32, u32);
     fn focused(&self) -> bool;
     fn resized(&mut self) -> bool;

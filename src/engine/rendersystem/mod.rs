@@ -5,8 +5,9 @@ use nalgebra::*;
 mod vulkan;
 
 pub trait RenderBackend {
-    fn init(&self, video: &Box<dyn crate::platform::video::VideoBackend>)
-        -> Box<dyn RenderBackend>;
+    fn init(video: &Box<dyn crate::platform::video::VideoBackend>) -> Box<dyn RenderBackend>
+    where
+        Self: Sized;
     fn load_resources(&mut self, models: &Vec<u8>);
     fn begin_commands(&mut self, video: &Box<dyn crate::platform::video::VideoBackend>);
     fn render_model(&mut self, model: &Model);
@@ -31,7 +32,6 @@ pub enum RenderApi {
 impl clap::ValueEnum for RenderApi {
     fn value_variants<'a>() -> &'a [Self] {
         &[
-            Self::None,
             #[cfg(not(any(macos, ios)))]
             Self::Vulkan,
             #[cfg(windows)]
@@ -76,9 +76,9 @@ impl State {
         info!("Render system initialization started");
         let backend = match render_api {
             #[cfg(not(any(macos, ios)))]
-            RenderApi::Vulkan => vulkan::State::default().init(video),
+            RenderApi::Vulkan => vulkan::State::init(video),
             //#[cfg(windows)]
-            //RenderApi::DirectX => directx::State::default().init(video),
+            //RenderApi::DirectX => directx::State::init(video),
             _ => panic!("Unimplemented render backend requested"),
         };
         info!("Render system initialization succeeded");
