@@ -1,6 +1,7 @@
 pub mod rendersystem;
 
 use crate::platform;
+use crate::platform::video::VideoBackend;
 use chrono::Local;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::{debug, info};
@@ -16,7 +17,7 @@ pub struct State {
     fps: f64,
     delta: i64,
 
-    video: platform::video::State,
+    video: Box<dyn platform::video::VideoBackend>,
     render: rendersystem::State,
 }
 
@@ -80,8 +81,8 @@ impl State {
 
         info!("Engine initialization started");
 
-        let video = platform::video::State::init();
-        let render = rendersystem::State::init(&video);
+        let video = platform::video::State::default().init();
+        let render = rendersystem::State::init(&video, args.render_api);
 
         Self {
             game_dir: args.game,
@@ -130,7 +131,7 @@ impl State {
         info!("Engine shutdown succeeded");
     }
 
-    pub fn video(&mut self) -> &mut platform::video::State {
+    pub fn video(&mut self) -> &mut Box<dyn platform::video::VideoBackend> {
         &mut self.video
     }
 

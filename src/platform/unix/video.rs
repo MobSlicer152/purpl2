@@ -4,6 +4,7 @@ use std::{ffi, mem};
 use xcb::x;
 use xcb::Xid;
 
+#[derive(Default)]
 pub struct State {
     connection: xcb::Connection,
     window: x::Window,
@@ -169,10 +170,6 @@ impl super::super::video::VideoBackend for State {
 
     fn focused(&self) -> bool {
         self.focused
-    }
-
-    fn get_handle(&self) -> usize {
-        self.
     }
 
     fn create_vulkan_surface(

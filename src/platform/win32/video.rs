@@ -12,6 +12,7 @@ const WINDOW_CLASS_NAME: &str = "PurplWindow";
 
 const MAGIC: u32 = 0x11223344;
 
+#[derive(Default)]
 #[repr(C)]
 pub struct State {
     magic: u32,
@@ -174,7 +175,7 @@ impl State {
 }
 
 impl super::super::video::VideoBackend for State {
-    fn init() -> Self {
+    fn init(&self) -> Box<dyn super::super::video::VideoBackend> {
         info!("Windows video initialization started");
 
         let (window, title, width, height) = unsafe {
@@ -184,7 +185,7 @@ impl super::super::video::VideoBackend for State {
 
         info!("Windows video initialization succeeded");
 
-        Self {
+        Box::new(Self {
             magic: MAGIC,
             window,
             title,
@@ -193,7 +194,7 @@ impl super::super::video::VideoBackend for State {
             resized: false,
             focused: false,
             closed: false,
-        }
+        })
     }
 
     fn update(&mut self) -> bool {
@@ -223,7 +224,7 @@ impl super::super::video::VideoBackend for State {
         !self.closed
     }
 
-    fn shutdown(self) {
+    fn shutdown(&mut self) {
         info!("Windows video shutdown started");
 
         debug!("Destroying window");

@@ -26,6 +26,9 @@ pub struct Args {
     game: String,
     #[arg(short, long, default_value_t = false)]
     wait_for_debugger: bool,
+    #[cfg_attr(not(any(macos, ios)), arg(short, long, default_value_t = engine::rendersystem::RenderApi::Vulkan))]
+    render_api: engine::rendersystem::RenderApi,
+
 }
 
 fn main() {

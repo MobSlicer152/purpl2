@@ -1,8 +1,8 @@
-use crate::{engine::rendersystem, platform, platform::video::VideoBackend};
+use crate::{engine::rendersystem, platform};
 use ash::{extensions, vk};
 use log::{debug, error, log, trace};
 use std::rc::Rc;
-use std::{alloc, cell::SyncUnsafeCell, cmp, collections::HashMap, ffi, mem, ptr, sync::Arc};
+use std::{alloc, cmp, ffi, mem, ptr};
 use vk_mem::*;
 
 macro_rules! vulkan_check {
@@ -353,7 +353,6 @@ pub struct State {
     device: ash::Device,
     surface_loader: extensions::khr::Surface,
     swapchain_loader: extensions::khr::Swapchain,
-    shader_object_loader: extensions::ext::ShaderObject,
     surface: vk::SurfaceKHR,
 
     allocator: vk_mem::Allocator,
@@ -1109,7 +1108,7 @@ impl State {
     }
 
     fn create_render_targets(
-        video: &platform::video::State,
+        video: &Box<dyn platform::video::VideoBackend>,
         instance: &ash::Instance,
         gpu: &GpuInfo,
         device: &ash::Device,
@@ -1208,11 +1207,17 @@ impl State {
         layout
     }
 
-    fn create_pipeline_layout(device: &ash::Device) -> vk::PipelineLayout {
+    fn create_pipeline_layout(device: &ash::Device, descriptor_layout: &vk::DescriptorSetLayout) -> vk::PipelineLayout {
+        let create_info = vk::PipelineLayoutCreateInfo {
+            p_set_layouts: [descriptor_layout.clone()].as_ptr(),
+            set_layout_count: 1,
+            ..Default::default()
+        };
 
+        unsafe { vulkan_check!(device.create_pipeline_layout(&create_info, Some(&Self::get_allocation_callbacks()))) }
     }
 
-    fn resize(&mut self, video: &platform::video::State) {
+    fn resize(&mut self, video: &Box<dyn platform::video::VideoBackend>) {
         debug!("Recreating swap chain");
 
         debug!("Waiting for device idle");
@@ -1376,5 +1381,519 @@ impl State {
         unsafe { device.update_descriptor_sets(write_infos.as_slice(), &[]) };
 
         descriptor_sets
+    }
+}
+
+impl Default for State {
+    // ONLY EXISTS SO TRAIT CAN BORROW SELF FOR INIT, DO NOT USE FOR ANYTHING ELSE
+    #[ignore = "invalid_value"]
+    fn default() -> Self {
+        unsafe { mem::zeroed::<Self>() }
+    }
+}
+
+impl rendersystem::RenderBackend for State {
+    fn init(&self, video: &Box<dyn platform::video::VideoBackend>) -> Box<dyn rendersystem::RenderBackend> {
+        debug!("Vulkan initialization started");
+
+        debug!("Loading Vulkan library");
+        let entry = unsafe { vulkan_check!(ash::Entry::load()) };
+
+        let instance = Self::create_instance(&entry);
+        let surface_loader = extensions::khr::Surface::new(&entry, &instance);
+        let surface = video.create_vulkan_surface(
+            &entry,
+            &instance,
+            Some(&State::get_allocation_callbacks()),
+        );
+        let gpus = Self::get_gpus(&instance, &surface_loader, &surface);
+        let gpu = 0;
+        let (device, graphics_queue, compute_queue) = Self::create_device(&instance, &gpus[gpu]);
+        let (command_pool, transfer_pool) = Self::create_command_pools(&device, &gpus[gpu]);
+        let command_buffers = Self::allocate_command_buffers(&device, &command_pool);
+        let allocator = Self::create_allocator(&instance, &device, gpus[gpu].device);
+        let fences = Self::create_fences(&device);
+        let (acquire_semaphores, render_complete_semaphores) = Self::create_semaphores(&device);
+        let surface_format = Self::choose_surface_format(&gpus[gpu]);
+        let present_mode = Self::choose_present_mode(&gpus[gpu]);
+        let video_size = video.get_size();
+        let swapchain_extent = vk::Extent2D {
+            width: video_size.0,
+            height: video_size.1,
+        };
+        let swapchain_loader = extensions::khr::Swapchain::new(&instance, &device);
+        let (swapchain, swapchain_images, swapchain_views) = Self::create_swapchain(
+            &device,
+            &gpus[gpu],
+            &surface,
+            &present_mode,
+            &surface_format,
+            &swapchain_extent,
+            &swapchain_loader,
+        );
+        let depth_image =
+            Self::create_render_targets(video, &instance, &gpus[gpu], &device, &allocator);
+        let descriptor_layout = Self::create_descriptor_layout(&device);
+        let pipeline_layout = Self::create_pipeline_layout(&device, &descriptor_layout);
+        let descriptor_pool = Self::create_descriptor_pool(&device);
+        let uniform_buffers = Self::allocate_uniform_buffers(&allocator);
+        let descriptor_sets = Self::allocate_descriptor_sets(
+            &device,
+            &descriptor_layout,
+            &descriptor_pool,
+            &uniform_buffers,
+        );
+
+        debug!("Vulkan initialization succeeded");
+
+        let mut self_ = Box::new(Self {
+            entry,
+            instance,
+            device,
+            surface_loader,
+            swapchain_loader,
+            surface,
+            gpu,
+            gpus,
+            graphics_queue,
+            compute_queue,
+            command_pool,
+            transfer_pool,
+            command_buffers,
+            fences,
+            acquire_semaphores,
+            render_complete_semaphores,
+            allocator,
+            swapchain,
+            swapchain_images,
+            swapchain_views,
+            surface_format,
+            present_mode,
+            swapchain_extent,
+            depth_image,
+            descriptor_layout,
+            descriptor_pool,
+            descriptor_sets,
+            pipeline_layout,
+            uniform_buffers,
+
+            initialized: true,
+            loaded: false,
+
+            in_frame: false,
+            frame_index: 0,
+            resized: false,
+            swapchain_index: 0,
+
+            model_buffer: None,
+
+            last_shader: None,
+            last_model: None,
+        });
+        self_.set_gpu(self_.gpu);
+
+        self_
+    }
+
+    fn load_resources(
+        &mut self,
+        models: &Vec<u8>,
+    ) {
+        if !models.is_empty() {
+            debug!("Creating model buffer");
+            
+            let transfer_buffer = vulkan_check!(HostBuffer::new(
+                &self.allocator,
+                models.len() as vk::DeviceSize,
+                vk::BufferUsageFlags::VERTEX_BUFFER
+                    | vk::BufferUsageFlags::INDEX_BUFFER
+                    | vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+            ));
+
+            unsafe { transfer_buffer.read(models, 0) };
+
+            self.model_buffer = Some(vulkan_check!(Buffer::new(
+                &self.allocator,
+                models.len() as vk::DeviceSize,
+                vk::BufferUsageFlags::VERTEX_BUFFER
+                    | vk::BufferUsageFlags::INDEX_BUFFER
+                    | vk::BufferUsageFlags::TRANSFER_DST,
+                vk::MemoryPropertyFlags::empty()
+            )));
+
+            transfer_buffer.buffer().copy(
+                &self.device,
+                &self.compute_queue,
+                &self.transfer_pool,
+                self.model_buffer.as_ref().unwrap(),
+            );
+            transfer_buffer.destroy(&self.allocator);
+        }
+
+        self.loaded = true;
+    }
+
+    fn begin_commands(&mut self, video: &Box<dyn platform::video::VideoBackend>) {
+        unsafe {
+            vulkan_check!(self.device.wait_for_fences(
+                &[self.fences[self.frame_index]],
+                true,
+                u64::MAX
+            ))
+        };
+
+        (self.swapchain_index, self.resized) = unsafe {
+            match self.swapchain_loader.acquire_next_image(
+                self.swapchain,
+                u64::MAX,
+                self.acquire_semaphores[self.frame_index],
+                vk::Fence::null(),
+            ) {
+                Ok(values) => (values.0 as usize, values.1),
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => (0, true),
+                Err(err) => {
+                    panic!("Failed to acquire next image: {err}");
+                }
+            }
+        };
+        if self.resized {
+            self.resize(video);
+            return;
+        }
+
+        unsafe {
+            vulkan_check!(self.device.reset_fences(&[self.fences[self.frame_index]]));
+            vulkan_check!(self.device.reset_command_buffer(
+                self.command_buffers[self.frame_index],
+                vk::CommandBufferResetFlags::empty()
+            ));
+            vulkan_check!(self.device.begin_command_buffer(
+                self.command_buffers[self.frame_index],
+                &vk::CommandBufferBeginInfo {
+                    flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+                    ..Default::default()
+                }
+            ));
+        }
+
+        let layout_barrier = vk::ImageMemoryBarrier {
+            dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            old_layout: vk::ImageLayout::UNDEFINED,
+            new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            image: self.swapchain_images[self.swapchain_index],
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            ..Default::default()
+        };
+
+        unsafe {
+            self.device.cmd_pipeline_barrier(
+                self.command_buffers[self.frame_index],
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[layout_barrier],
+            )
+        };
+
+        let color_attachment = vk::RenderingAttachmentInfo {
+            image_view: self.swapchain_views[self.swapchain_index],
+            image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            load_op: vk::AttachmentLoadOp::CLEAR,
+            store_op: vk::AttachmentStoreOp::STORE,
+            clear_value: vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            },
+            ..Default::default()
+        };
+        let depth_attachment = vk::RenderingAttachmentInfo {
+            image_view: *self.depth_image.view(),
+            image_layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+            load_op: vk::AttachmentLoadOp::CLEAR,
+            store_op: vk::AttachmentStoreOp::STORE,
+            clear_value: vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            },
+            ..Default::default()
+        };
+        let rendering_info = vk::RenderingInfo {
+            color_attachment_count: 1,
+            p_color_attachments: ptr::addr_of!(color_attachment),
+            p_depth_attachment: ptr::addr_of!(depth_attachment),
+            layer_count: 1,
+            render_area: vk::Rect2D {
+                extent: self.swapchain_extent,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        unsafe {
+            self.device
+                .cmd_begin_rendering(self.command_buffers[self.frame_index], &rendering_info)
+        };
+
+        self.in_frame = true;
+    }
+
+    fn render_model(&mut self, model: &rendersystem::Model) {
+        /*if self.last_model.is_none() || self.last_model.as_ref().unwrap() != &model.name {
+            unsafe {
+                self.device.cmd_bind_vertex_buffers(
+                    self.command_buffers[self.frame_index],
+                    0,
+                    &[*self.model_buffer.as_ref().unwrap().handle()],
+                    &[model.handle.offset],
+                );
+                self.device.cmd_bind_index_buffer(
+                    self.command_buffers[self.frame_index],
+                    *self.model_buffer.as_ref().unwrap().handle(),
+                    model.handle.offset + model.handle.vertices_size,
+                    vk::IndexType::UINT32,
+                );
+            }
+            self.last_model = Some(model.name.clone());
+        }
+
+        let shader = unsafe {
+            model
+                .material
+                .get()
+                .as_ref()
+                .unwrap()
+                .shader
+                .get()
+                .as_ref()
+                .unwrap()
+        };
+        unsafe {
+            //self.device.cmd_bind_descriptor_sets()
+
+            self.device.cmd_draw_indexed(
+                self.command_buffers[self.frame_index],
+                (model.handle.indices_size / mem::size_of::<u32>() as u64) as u32,
+                1,
+                0,
+                0,
+                0,
+            );
+        };*/
+    }
+
+    fn present(&mut self) {
+        self.in_frame = false;
+
+        if self.resized {
+            self.resized = false;
+            return;
+        }
+
+        unsafe {
+            self.device
+                .cmd_end_rendering(self.command_buffers[self.frame_index])
+        };
+
+        let layout_barrier = vk::ImageMemoryBarrier {
+            src_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            new_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+            image: self.swapchain_images[self.swapchain_index],
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            ..Default::default()
+        };
+
+        unsafe {
+            self.device.cmd_pipeline_barrier(
+                self.command_buffers[self.frame_index],
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[layout_barrier],
+            );
+
+            vulkan_check!(self
+                .device
+                .end_command_buffer(self.command_buffers[self.frame_index]));
+        };
+
+        let wait_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+        let submit_info = vk::SubmitInfo {
+            p_wait_dst_stage_mask: ptr::addr_of!(wait_stage),
+            wait_semaphore_count: 1,
+            p_wait_semaphores: ptr::addr_of!(self.acquire_semaphores[self.frame_index]),
+            signal_semaphore_count: 1,
+            p_signal_semaphores: ptr::addr_of!(self.render_complete_semaphores[self.frame_index]),
+            command_buffer_count: 1,
+            p_command_buffers: ptr::addr_of!(self.command_buffers[self.frame_index]),
+            ..Default::default()
+        };
+
+        unsafe {
+            vulkan_check!(self.device.queue_submit(
+                self.compute_queue,
+                &[submit_info],
+                self.fences[self.frame_index]
+            ))
+        }
+
+        let index = self.swapchain_index as u32;
+        let present_info = vk::PresentInfoKHR {
+            p_swapchains: ptr::addr_of!(self.swapchain),
+            swapchain_count: 1,
+            p_wait_semaphores: ptr::addr_of!(self.render_complete_semaphores[self.frame_index]),
+            wait_semaphore_count: 1,
+            p_image_indices: ptr::addr_of!(index),
+            ..Default::default()
+        };
+
+        match unsafe {
+            self.swapchain_loader
+                .queue_present(self.compute_queue, &present_info)
+        } {
+            Ok(_) => {}
+            Err(err) if err == vk::Result::ERROR_OUT_OF_DATE_KHR => {}
+            Err(err) => {
+                panic!(
+                    "Failed to present frame {} (swapchain image {}): {err}",
+                    self.frame_index, self.swapchain_index
+                )
+            }
+        }
+
+        self.frame_index = (self.frame_index + 1) % FRAME_COUNT;
+    }
+
+    fn unload_resources(&mut self) {
+        self.model_buffer.take().unwrap().destroy(&self.allocator);
+    }
+
+    fn shutdown(&mut self) {
+        debug!("Vulkan shutdown started");
+
+        self.loaded = false;
+        self.initialized = false;
+
+        debug!("Waiting for device idle");
+        unsafe { vulkan_check!(self.device.device_wait_idle()) };
+
+        unsafe {
+            debug!("Freeing {FRAME_COUNT} uniform buffers");
+            for _ in 0..self.uniform_buffers.len() {
+                self.uniform_buffers.remove(0).destroy(&self.allocator)
+            }
+
+            debug!("Destroying descriptor pool {:#?}", self.descriptor_pool);
+            self.device.destroy_descriptor_pool(
+                self.descriptor_pool,
+                Some(&State::get_allocation_callbacks()),
+            );
+
+            debug!(
+                "Destroying descriptor set layout {:#?}",
+                self.descriptor_layout
+            );
+            self.device.destroy_descriptor_set_layout(
+                self.descriptor_layout,
+                Some(&State::get_allocation_callbacks()),
+            );
+
+            self.destroy_render_targets();
+            self.destroy_swapchain();
+
+            debug!("Destroying {} semaphores", FRAME_COUNT * 2);
+            self.acquire_semaphores.iter().for_each(|semaphore| {
+                self.device
+                    .destroy_semaphore(*semaphore, Some(&State::get_allocation_callbacks()))
+            });
+            self.render_complete_semaphores
+                .iter()
+                .for_each(|semaphore| {
+                    self.device
+                        .destroy_semaphore(*semaphore, Some(&State::get_allocation_callbacks()))
+                });
+
+            debug!("Destroying {FRAME_COUNT} fences");
+            self.fences.iter().for_each(|fence| {
+                self.device
+                    .destroy_fence(*fence, Some(&State::get_allocation_callbacks()))
+            });
+            debug!("Destroying transfer command pool {:#?}", self.transfer_pool);
+            self.device
+                .destroy_command_pool(self.transfer_pool, Some(&State::get_allocation_callbacks()));
+            debug!("Destroying command pool {:#?}", self.command_pool);
+            self.device
+                .destroy_command_pool(self.command_pool, Some(&State::get_allocation_callbacks()));
+            debug!("Destroying allocator");
+            ptr::drop_in_place(ptr::addr_of_mut!(self.allocator));
+            debug!("Destroying logical device {:#?}", self.device.handle());
+            self.device
+                .destroy_device(Some(&State::get_allocation_callbacks()));
+            debug!("Destroying surface {:#?}", self.surface);
+            self.surface_loader
+                .destroy_surface(self.surface, Some(&State::get_allocation_callbacks()));
+            debug!("Destroying instance {:#?}", self.instance.handle());
+            self.instance
+                .destroy_instance(Some(&State::get_allocation_callbacks()));
+        }
+
+        debug!("Vulkan shutdown succeeded");
+    }
+
+    fn set_gpu(&mut self, gpu_index: usize) -> usize {
+        let old_idx = self.gpu;
+        if gpu_index < self.gpus.len() {
+            self.gpu = gpu_index;
+            let gpu = &self.gpus[self.gpu];
+
+            let name = unsafe {
+                ffi::CStr::from_ptr(gpu.properties.device_name.as_ptr())
+                    .to_str()
+                    .unwrap()
+            };
+            debug!(
+                "Selected {:#?} device {}, {} [{:04x}:{:04x}] with score {}",
+                gpu.properties.device_type,
+                gpu_index,
+                name,
+                gpu.properties.vendor_id,
+                gpu.properties.device_id,
+                gpu.performance_score
+            );
+        }
+
+        old_idx
+    }
+
+    fn is_initialized(&self) -> bool {
+        self.initialized
+    }
+
+    fn is_loaded(&self) -> bool {
+        self.loaded
+    }
+
+    fn is_in_frame(&self) -> bool {
+        self.in_frame
     }
 }
