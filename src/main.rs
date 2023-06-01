@@ -36,6 +36,10 @@ fn main() {
     platform::init();
     let mut engine_state = engine::State::init(Args::parse());
 
+    let shader = engine::rendersystem::Shader::new(engine_state.render(), "basic");
+    let texture = engine::rendersystem::RenderTexture::new();
+    let material = engine::rendersystem::Material::new(engine_state.render(), "basic", &shader, &texture);
+    let model = engine::rendersystem::Model::new();
     while engine_state.video().update() {
         engine_state.update();
     }

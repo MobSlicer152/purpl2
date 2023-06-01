@@ -1,4 +1,4 @@
-use log::info;
+use log::{error, info};
 use nalgebra::*;
 use std::any::Any;
 
@@ -22,12 +22,6 @@ pub trait RenderBackend {
     fn is_in_frame(&self) -> bool;
 
     fn create_shader(&self, name: &String) -> Result<Box<dyn ShaderData>, String>;
-    fn shader_vertex_extension() -> String
-    where
-        Self: Sized;
-    fn shader_fragment_extension() -> String
-    where
-        Self: Sized;
 }
 
 #[derive(Clone, Debug)]
@@ -120,6 +114,7 @@ impl State {
         if self.backend.is_initialized() && self.backend.is_loaded() {
             info!("Unloading resources");
             self.backend.unload_resources();
+            self.models.clear();
             info!("Done unloading resources");
         }
     }
@@ -133,6 +128,7 @@ impl State {
 }
 
 pub trait ShaderData {
+    fn as_any(&self) -> &dyn Any;
     fn destroy(&mut self, state: &Box<dyn RenderBackend>);
 }
 
@@ -142,13 +138,13 @@ pub struct Shader {
 }
 
 impl Shader {
-    pub fn new(state: &State, name: &str) -> Self {
+    pub fn new(state: &State, name: &str) -> Result<Self, String> {
         let name = String::from(name);
-        let data = state.backend.create_shader(&name).unwrap();
-        Self {
+        let data = state.backend.create_shader(&name)?;
+        Ok(Self {
             name,
             data
-        }
+        })
     }
 }
 
@@ -161,21 +157,21 @@ pub struct UniformData {
 
 pub struct RenderTexture {
     name: String,
-    //texture: crate::texture::Texture,
+    texture: image::RgbaImage,
 }
 
-pub struct Material {
+pub struct Material<'a> {
     name: String,
-    shader: Shader,
-    texture: RenderTexture,
+    shader: &'a Shader,
+    texture: &'a RenderTexture,
 }
 
-impl Material {
+impl<'a> Material<'a> {
     pub fn new(
         state: &mut State,
         name: &str,
-        shader: Shader,
-        texture: RenderTexture,
+        shader: &'a Shader,
+        texture: &'a RenderTexture,
     ) -> Result<Self, ()> {
         Ok(Self {
             name: String::from(name),
@@ -200,14 +196,72 @@ pub struct Vertex {
     normal: Vector3<f32>,
 }
 
-#[derive(Clone, Default)]
-pub struct Model {
+#[derive(Clone)]
+pub struct Model<'a> {
     name: String,
-    size: usize,
     offset: usize,
+    vertices_size: usize,
+    indices_size: usize,
+    material: &'a Material<'a>
 }
 
-impl Renderable for Model {
+impl<'a> Model<'a> {
+    pub fn new(state: &State, name: &str, models: &Vec<tobj::Model>, material: &'a Material<'a>) -> Self {
+        if !state.backend.is_initialized() || state.backend.is_loaded() {
+            error!("Not creating model {name} after resources have been loaded");
+        }
+
+        info!("Creating model {name}");
+
+        // largely based on https://github.com/bwasty/learn-opengl-rs/blob/master/src/model.rs
+        let mut all_vertices = Vec::new();
+        let mut all_indices: Vec<u32> = Vec::new();
+        for model in models {
+            let mut mesh = model.mesh;
+
+            assert!(!mesh.normals.is_empty() && !mesh.texcoords.is_empty());
+
+            let vertex_count = mesh.positions.len() / 3;
+            let mut vertices = Vec::with_capacity(vertex_count);
+            let (p, t, n) = (&mesh.positions, &mesh.texcoords, &mesh.normals);
+            for i in 0..vertex_count {
+                let position = Vector3::new(p[i * 3 + 0], p[i * 3 + 1], p[i * 3 + 2]);
+                let texture_coordinate = Vector2::new(t[i * 2 + 0], t[i * 2 + 1]);
+                let normal = Vector3::new(n[i * 3 + 0], n[i * 3 + 1], n[i * 3 + 2]);
+                vertices.push(Vertex {
+                    position,
+                    texture_coordinate,
+                    normal
+                })
+            }
+
+            all_vertices.append(&mut vertices);
+            all_indices.append(&mut mesh.indices);
+        }
+
+        let vertices_size = all_vertices.len() * mem::size_of::<Vertex>();
+        let indices_size = all_indices.len() * mem::size_of::<u32>();
+
+        let mut data = Vec::new();
+        let vertices = all_vertices.into_raw_parts();
+        data.append(&mut unsafe { Vec::from_raw_parts(vertices.0 as *mut u8, vertices_size, vertices_size) });
+        let indices = all_indices.into_raw_parts();
+        data.append(&mut unsafe { Vec::from_raw_parts(indices.0 as *mut u8, indices_size, indices_size) });
+
+        let offset = state.models.len();
+        state.models.append(&mut data);
+
+        Self { 
+            name: String::from(name),
+            offset,
+            vertices_size,
+            indices_size,
+            material
+        }
+    }
+}
+
+impl<'a> Renderable for Model<'a> {
     fn render(&self, state: &mut State) {
         if state.backend.is_in_frame() {
             state.backend.render_model(self);

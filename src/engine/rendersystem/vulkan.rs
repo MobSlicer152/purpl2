@@ -397,8 +397,7 @@ pub struct State {
 
     model_buffer: Option<Buffer>,
 
-    last_shader: Option<super::Shader>,
-    last_model: Option<super::Model>,
+    last_model_offset: Option<usize>,
 }
 
 impl State {
@@ -1395,9 +1394,7 @@ impl super::RenderBackend for State {
         self
     }
 
-    fn init(
-        video: &Box<dyn platform::video::VideoBackend>,
-    ) -> Box<dyn super::RenderBackend> {
+    fn init(video: &Box<dyn platform::video::VideoBackend>) -> Box<dyn super::RenderBackend> {
         debug!("Vulkan initialization started");
 
         debug!("Loading Vulkan library");
@@ -1491,8 +1488,7 @@ impl super::RenderBackend for State {
 
             model_buffer: None,
 
-            last_shader: None,
-            last_model: None,
+            last_model_offset: None,
         });
         self_.set_gpu(self_.gpu);
 
@@ -1651,47 +1647,50 @@ impl super::RenderBackend for State {
     }
 
     fn render_model(&mut self, model: &super::Model) {
-        /*if self.last_model.is_none() || self.last_model.as_ref().unwrap().name != &model.name {
+        if self.last_model_offset.is_none() || self.last_model_offset.unwrap() != model.offset {
             unsafe {
                 self.device.cmd_bind_vertex_buffers(
                     self.command_buffers[self.frame_index],
                     0,
                     &[*self.model_buffer.as_ref().unwrap().handle()],
-                    &[model.offset],
+                    &[model.offset as vk::DeviceSize],
                 );
                 self.device.cmd_bind_index_buffer(
                     self.command_buffers[self.frame_index],
                     *self.model_buffer.as_ref().unwrap().handle(),
-                    model.offset + model.vertices_size,
+                    (model.offset + model.vertices_size) as vk::DeviceSize,
                     vk::IndexType::UINT32,
                 );
             }
-            self.last_model = Some(model.clone());
+            self.last_model_offset = Some(model.offset);
         }
 
-        let shader = unsafe {
-            model
-                .material
-                .get()
-                .as_ref()
-                .unwrap()
-                .shader
-                .get()
-                .as_ref()
-                .unwrap()
-        };
+        let shader = model.material.shader;
         unsafe {
-            //self.device.cmd_bind_descriptor_sets()
+            self.device.cmd_bind_descriptor_sets(
+                self.command_buffers[self.frame_index],
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                0,
+                &[self.descriptor_sets[self.frame_index]],
+                &[],
+            );
+
+            self.device.cmd_bind_pipeline(
+                self.command_buffers[self.frame_index],
+                vk::PipelineBindPoint::GRAPHICS,
+                shader.data.as_any().downcast_ref().unwrap().data.clone(),
+            );
 
             self.device.cmd_draw_indexed(
                 self.command_buffers[self.frame_index],
-                (model.handle.indices_size / mem::size_of::<u32>() as u64) as u32,
+                (model.indices_size / mem::size_of::<u32>()) as u32,
                 1,
                 0,
                 0,
                 0,
             );
-        };*/
+        };
     }
 
     fn present(&mut self) {
@@ -1903,29 +1902,29 @@ impl super::RenderBackend for State {
     fn is_in_frame(&self) -> bool {
         self.in_frame
     }
-    
+
     fn create_shader(&self, name: &String) -> Result<Box<dyn super::ShaderData>, String> {
         Ok(Box::new(ShaderData {
-            pipeline: vk::Pipeline::null()
+            pipeline: vk::Pipeline::null(),
         }))
-    }
-
-    fn shader_vertex_extension() -> String {
-        String::from(".vert.spv")
-    }
-
-    fn shader_fragment_extension() -> String {
-        String::from(".frag.spv")
     }
 }
 
 pub struct ShaderData {
-    pipeline: vk::Pipeline
+    pipeline: vk::Pipeline,
 }
 
 impl super::ShaderData for ShaderData {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn destroy(&mut self, state: &Box<dyn super::RenderBackend>) {
         let state: &State = state.as_any().downcast_ref().unwrap();
-        unsafe { state.device.destroy_pipeline(self.pipeline, Some(&State::get_allocation_callbacks())) };
+        unsafe {
+            state
+                .device
+                .destroy_pipeline(self.pipeline, Some(&State::get_allocation_callbacks()))
+        };
     }
 }
