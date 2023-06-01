@@ -1,8 +1,8 @@
-use crate::{engine::rendersystem, platform};
+use crate::platform;
 use ash::{extensions, vk};
 use log::{debug, error, log, trace};
 use std::rc::Rc;
-use std::{alloc, cmp, ffi, mem, ptr};
+use std::{alloc, any::Any, cmp, ffi, mem, ptr};
 use vk_mem::*;
 
 macro_rules! vulkan_check {
@@ -397,8 +397,8 @@ pub struct State {
 
     model_buffer: Option<Buffer>,
 
-    last_shader: Option<String>,
-    last_model: Option<String>,
+    last_shader: Option<super::Shader>,
+    last_model: Option<super::Model>,
 }
 
 impl State {
@@ -1207,14 +1207,20 @@ impl State {
         layout
     }
 
-    fn create_pipeline_layout(device: &ash::Device, descriptor_layout: &vk::DescriptorSetLayout) -> vk::PipelineLayout {
+    fn create_pipeline_layout(
+        device: &ash::Device,
+        descriptor_layout: &vk::DescriptorSetLayout,
+    ) -> vk::PipelineLayout {
         let create_info = vk::PipelineLayoutCreateInfo {
             p_set_layouts: [descriptor_layout.clone()].as_ptr(),
             set_layout_count: 1,
             ..Default::default()
         };
 
-        unsafe { vulkan_check!(device.create_pipeline_layout(&create_info, Some(&Self::get_allocation_callbacks()))) }
+        unsafe {
+            vulkan_check!(device
+                .create_pipeline_layout(&create_info, Some(&Self::get_allocation_callbacks())))
+        }
     }
 
     fn resize(&mut self, video: &Box<dyn platform::video::VideoBackend>) {
@@ -1319,7 +1325,7 @@ impl State {
         buffers.resize_with(3, || {
             vulkan_check!(HostBuffer::new(
                 allocator,
-                mem::size_of::<rendersystem::UniformData>() as u64,
+                mem::size_of::<super::UniformData>() as u64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             ))
@@ -1355,7 +1361,7 @@ impl State {
         buffer_infos.resize_with(FRAME_COUNT, || {
             let info = vk::DescriptorBufferInfo {
                 offset: 0,
-                range: mem::size_of::<rendersystem::UniformData>() as u64,
+                range: mem::size_of::<super::UniformData>() as u64,
                 buffer: *uniform_buffers[i].buffer().handle(),
             };
             i += 1;
@@ -1384,8 +1390,14 @@ impl State {
     }
 }
 
-impl rendersystem::RenderBackend for State {
-    fn init(video: &Box<dyn platform::video::VideoBackend>) -> Box<dyn rendersystem::RenderBackend> {
+impl super::RenderBackend for State {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn init(
+        video: &Box<dyn platform::video::VideoBackend>,
+    ) -> Box<dyn super::RenderBackend> {
         debug!("Vulkan initialization started");
 
         debug!("Loading Vulkan library");
@@ -1487,13 +1499,10 @@ impl rendersystem::RenderBackend for State {
         self_
     }
 
-    fn load_resources(
-        &mut self,
-        models: &Vec<u8>,
-    ) {
+    fn load_resources(&mut self, models: &Vec<u8>) {
         if !models.is_empty() {
             debug!("Creating model buffer");
-            
+
             let transfer_buffer = vulkan_check!(HostBuffer::new(
                 &self.allocator,
                 models.len() as vk::DeviceSize,
@@ -1641,23 +1650,23 @@ impl rendersystem::RenderBackend for State {
         self.in_frame = true;
     }
 
-    fn render_model(&mut self, model: &rendersystem::Model) {
-        /*if self.last_model.is_none() || self.last_model.as_ref().unwrap() != &model.name {
+    fn render_model(&mut self, model: &super::Model) {
+        /*if self.last_model.is_none() || self.last_model.as_ref().unwrap().name != &model.name {
             unsafe {
                 self.device.cmd_bind_vertex_buffers(
                     self.command_buffers[self.frame_index],
                     0,
                     &[*self.model_buffer.as_ref().unwrap().handle()],
-                    &[model.handle.offset],
+                    &[model.offset],
                 );
                 self.device.cmd_bind_index_buffer(
                     self.command_buffers[self.frame_index],
                     *self.model_buffer.as_ref().unwrap().handle(),
-                    model.handle.offset + model.handle.vertices_size,
+                    model.offset + model.vertices_size,
                     vk::IndexType::UINT32,
                 );
             }
-            self.last_model = Some(model.name.clone());
+            self.last_model = Some(model.clone());
         }
 
         let shader = unsafe {
@@ -1798,7 +1807,13 @@ impl rendersystem::RenderBackend for State {
             debug!("Destroying descriptor pool {:#?}", self.descriptor_pool);
             self.device.destroy_descriptor_pool(
                 self.descriptor_pool,
-                Some(&State::get_allocation_callbacks()),
+                Some(&Self::get_allocation_callbacks()),
+            );
+
+            debug!("Destroying pipeline layout {:#?}", self.pipeline_layout);
+            self.device.destroy_pipeline_layout(
+                self.pipeline_layout,
+                Some(&Self::get_allocation_callbacks()),
             );
 
             debug!(
@@ -1807,7 +1822,7 @@ impl rendersystem::RenderBackend for State {
             );
             self.device.destroy_descriptor_set_layout(
                 self.descriptor_layout,
-                Some(&State::get_allocation_callbacks()),
+                Some(&Self::get_allocation_callbacks()),
             );
 
             self.destroy_render_targets();
@@ -1816,37 +1831,37 @@ impl rendersystem::RenderBackend for State {
             debug!("Destroying {} semaphores", FRAME_COUNT * 2);
             self.acquire_semaphores.iter().for_each(|semaphore| {
                 self.device
-                    .destroy_semaphore(*semaphore, Some(&State::get_allocation_callbacks()))
+                    .destroy_semaphore(*semaphore, Some(&Self::get_allocation_callbacks()))
             });
             self.render_complete_semaphores
                 .iter()
                 .for_each(|semaphore| {
                     self.device
-                        .destroy_semaphore(*semaphore, Some(&State::get_allocation_callbacks()))
+                        .destroy_semaphore(*semaphore, Some(&Self::get_allocation_callbacks()))
                 });
 
             debug!("Destroying {FRAME_COUNT} fences");
             self.fences.iter().for_each(|fence| {
                 self.device
-                    .destroy_fence(*fence, Some(&State::get_allocation_callbacks()))
+                    .destroy_fence(*fence, Some(&Self::get_allocation_callbacks()))
             });
             debug!("Destroying transfer command pool {:#?}", self.transfer_pool);
             self.device
-                .destroy_command_pool(self.transfer_pool, Some(&State::get_allocation_callbacks()));
+                .destroy_command_pool(self.transfer_pool, Some(&Self::get_allocation_callbacks()));
             debug!("Destroying command pool {:#?}", self.command_pool);
             self.device
-                .destroy_command_pool(self.command_pool, Some(&State::get_allocation_callbacks()));
+                .destroy_command_pool(self.command_pool, Some(&Self::get_allocation_callbacks()));
             debug!("Destroying allocator");
             ptr::drop_in_place(ptr::addr_of_mut!(self.allocator));
             debug!("Destroying logical device {:#?}", self.device.handle());
             self.device
-                .destroy_device(Some(&State::get_allocation_callbacks()));
+                .destroy_device(Some(&Self::get_allocation_callbacks()));
             debug!("Destroying surface {:#?}", self.surface);
             self.surface_loader
-                .destroy_surface(self.surface, Some(&State::get_allocation_callbacks()));
+                .destroy_surface(self.surface, Some(&Self::get_allocation_callbacks()));
             debug!("Destroying instance {:#?}", self.instance.handle());
             self.instance
-                .destroy_instance(Some(&State::get_allocation_callbacks()));
+                .destroy_instance(Some(&Self::get_allocation_callbacks()));
         }
 
         debug!("Vulkan shutdown succeeded");
@@ -1887,5 +1902,30 @@ impl rendersystem::RenderBackend for State {
 
     fn is_in_frame(&self) -> bool {
         self.in_frame
+    }
+    
+    fn create_shader(&self, name: &String) -> Result<Box<dyn super::ShaderData>, String> {
+        Ok(Box::new(ShaderData {
+            pipeline: vk::Pipeline::null()
+        }))
+    }
+
+    fn shader_vertex_extension() -> String {
+        String::from(".vert.spv")
+    }
+
+    fn shader_fragment_extension() -> String {
+        String::from(".frag.spv")
+    }
+}
+
+pub struct ShaderData {
+    pipeline: vk::Pipeline
+}
+
+impl super::ShaderData for ShaderData {
+    fn destroy(&mut self, state: &Box<dyn super::RenderBackend>) {
+        let state: &State = state.as_any().downcast_ref().unwrap();
+        unsafe { state.device.destroy_pipeline(self.pipeline, Some(&State::get_allocation_callbacks())) };
     }
 }

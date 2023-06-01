@@ -1,10 +1,12 @@
 use log::info;
 use nalgebra::*;
+use std::any::Any;
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
 mod vulkan;
 
 pub trait RenderBackend {
+    fn as_any(&self) -> &dyn Any;
     fn init(video: &Box<dyn crate::platform::video::VideoBackend>) -> Box<dyn RenderBackend>
     where
         Self: Sized;
@@ -18,6 +20,14 @@ pub trait RenderBackend {
     fn is_initialized(&self) -> bool;
     fn is_loaded(&self) -> bool;
     fn is_in_frame(&self) -> bool;
+
+    fn create_shader(&self, name: &String) -> Result<Box<dyn ShaderData>, String>;
+    fn shader_vertex_extension() -> String
+    where
+        Self: Sized;
+    fn shader_fragment_extension() -> String
+    where
+        Self: Sized;
 }
 
 #[derive(Clone, Debug)]
@@ -73,12 +83,12 @@ impl State {
         video: &Box<dyn crate::platform::video::VideoBackend>,
         render_api: RenderApi,
     ) -> Self {
-        info!("Render system initialization started");
+        info!("Render system initialization started with backend {render_api}");
         let backend = match render_api {
             #[cfg(not(any(macos, ios)))]
             RenderApi::Vulkan => vulkan::State::init(video),
-            //#[cfg(windows)]
-            //RenderApi::DirectX => directx::State::init(video),
+            #[cfg(windows)]
+            RenderApi::DirectX => todo!(), //directx::State::init(video),
             _ => panic!("Unimplemented render backend requested"),
         };
         info!("Render system initialization succeeded");
@@ -122,8 +132,24 @@ impl State {
     }
 }
 
+pub trait ShaderData {
+    fn destroy(&mut self, state: &Box<dyn RenderBackend>);
+}
+
 pub struct Shader {
     name: String,
+    data: Box<dyn ShaderData>
+}
+
+impl Shader {
+    pub fn new(state: &State, name: &str) -> Self {
+        let name = String::from(name);
+        let data = state.backend.create_shader(&name).unwrap();
+        Self {
+            name,
+            data
+        }
+    }
 }
 
 #[repr(C)]
@@ -174,6 +200,7 @@ pub struct Vertex {
     normal: Vector3<f32>,
 }
 
+#[derive(Clone, Default)]
 pub struct Model {
     name: String,
     size: usize,

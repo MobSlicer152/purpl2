@@ -103,7 +103,7 @@ impl super::super::video::VideoBackend for State {
             width,
             height,
             resized: false,
-            focused: false,
+            focused: true,
             closed: false,
         })
     }

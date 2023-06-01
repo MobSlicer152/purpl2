@@ -63,8 +63,6 @@ impl State {
     }
 
     pub fn init(args: crate::Args) -> Self {
-        debug!("{args:#?}");
-
         if args.wait_for_debugger {
             while !platform::have_debugger() {}
         }
@@ -79,13 +77,19 @@ impl State {
             panic!("Failed to set up logger");
         }
 
+        debug!("{args:#?}");
+
         info!("Engine initialization started");
+
+        let game_dir = fs::canonicalize(args.game).unwrap().as_path().to_str().unwrap().replace("\\\\?\\", "").replace("\\", "/");
+        info!("Game directory is {}", game_dir);
+        info!("Data directory is {}", DataDirs::base());
 
         let video = platform::video::State::init();
         let render = rendersystem::State::init(&video, args.render_api);
 
         Self {
-            game_dir: args.game,
+            game_dir,
             start_time: 0,
             last_time: 0,
             runtime: 0,
@@ -149,7 +153,7 @@ impl DataDirs {
 
     pub fn base() -> String {
         let basedirs = directories::BaseDirs::new().unwrap();
-        let subdir_path = basedirs.data_dir().to_str().unwrap().replace('\\', "/");
+        let subdir_path = basedirs.data_dir().to_str().unwrap().replace("\\", "/");
         format!("{subdir_path}/{GAME_NAME}/")
     }
 
