@@ -81,7 +81,13 @@ impl State {
 
         info!("Engine initialization started");
 
-        let game_dir = fs::canonicalize(args.game).unwrap().as_path().to_str().unwrap().replace("\\\\?\\", "").replace("\\", "/");
+        let game_dir = fs::canonicalize(args.game)
+            .unwrap()
+            .as_path()
+            .to_str()
+            .unwrap()
+            .replace("\\\\?\\", "")
+            .replace("\\", "/");
         info!("Game directory is {}", game_dir);
         info!("Data directory is {}", DataDirs::base());
 
@@ -100,7 +106,10 @@ impl State {
         }
     }
 
-    pub fn update(&mut self) {
+    pub fn update<F>(&mut self, in_render: Option<F>)
+    where
+        F: FnOnce(&mut Self),
+    {
         if !self.video.focused() || self.video.resized() {
             return;
         }
@@ -123,6 +132,10 @@ impl State {
 
         self.render.begin_commands(&self.video);
 
+        if let Some(in_render) = in_render {
+            in_render(self);
+        }
+
         self.render.present();
     }
 
@@ -135,11 +148,11 @@ impl State {
         info!("Engine shutdown succeeded");
     }
 
-    pub fn video(&mut self) -> &mut Box<dyn platform::video::VideoBackend> {
+    pub fn video_state(&mut self) -> &mut Box<dyn platform::video::VideoBackend> {
         &mut self.video
     }
 
-    pub fn render(&mut self) -> &mut rendersystem::State {
+    pub fn render_state(&mut self) -> &mut rendersystem::State {
         &mut self.render
     }
 }

@@ -2,7 +2,7 @@ use crate::platform;
 use ash::{extensions, vk};
 use log::{debug, error, log, trace};
 use std::rc::Rc;
-use std::{alloc, any::Any, cmp, ffi, mem, ptr};
+use std::{alloc, any::Any, cmp, ffi, fs, mem, ptr};
 use vk_mem::*;
 
 macro_rules! vulkan_check {
@@ -1679,7 +1679,10 @@ impl super::RenderBackend for State {
             self.device.cmd_bind_pipeline(
                 self.command_buffers[self.frame_index],
                 vk::PipelineBindPoint::GRAPHICS,
-                shader.data.as_any().downcast_ref().unwrap().data.clone(),
+                (shader.data.as_any().downcast_ref() as Option<&ShaderData>)
+                    .unwrap()
+                    .pipeline
+                    .clone(),
             );
 
             self.device.cmd_draw_indexed(
@@ -1903,7 +1906,84 @@ impl super::RenderBackend for State {
         self.in_frame
     }
 
-    fn create_shader(&self, name: &String) -> Result<Box<dyn super::ShaderData>, String> {
+    fn create_shader(
+        &self,
+        shader_path: &String,
+        name: &String,
+    ) -> Result<Box<dyn super::ShaderData>, String> {
+        debug!("Loading Vulkan shader {name}");
+
+        let vertex_path = format!("{shader_path}.vert.spv");
+        let fragment_path = format!("{shader_path}.frag.spv");
+        let vertex_binary = match fs::read(vertex_path) {
+            Ok(binary) => binary,
+            Err(err) => {
+                error!("Failed to read vertex shader {vertex_path}: {err}");
+                return Err(err.to_string());
+            }
+        };
+        let fragment_binary = match fs::read(fragment_path) {
+            Ok(binary) => binary,
+            Err(err) => {
+                error!("Failed to read fragment shader {fragment_path}: {err}");
+                return Err(err.to_string());
+            }
+        };
+
+        let vertex_shader_info = vk::ShaderModuleCreateInfo {
+            code_size: vertex_binary.len(),
+            p_code: vertex_binary.as_ptr() as *const u32,
+            ..Default::default()
+        };
+        let fragment_shader_info = vk::ShaderModuleCreateInfo {
+            code_size: fragment_binary.len(),
+            p_code: fragment_binary.as_ptr() as *const u32,
+            ..Default::default()
+        };
+
+        let (vertex_module, fragment_module) = unsafe {
+            (
+                vulkan_check!(self.device.create_shader_module(
+                    &vertex_shader_info,
+                    Some(&Self::get_allocation_callbacks())
+                )),
+                vulkan_check!(self.device.create_shader_module(
+                    &fragment_shader_info,
+                    Some(&Self::get_allocation_callbacks())
+                )),
+            )
+        };
+
+        const dynamic_states: [vk::DynamicState; 4] = [
+            vk::DynamicState::VIEWPORT,
+            vk::DynamicState::SCISSOR,
+            vk::DynamicState::LINE_WIDTH,
+            vk::DynamicState::PRIMITIVE_TOPOLOGY,
+        ];
+
+        let pipeline_dynamic_state = vk::PipelineDynamicStateCreateInfo {
+            dynamic_state_count: dynamic_states.len() as u32,
+            p_dynamic_states: dynamic_states.as_ptr(),
+            ..Default::default()
+        };
+
+        let vertex_stage_info = vk::PipelineShaderStageCreateInfo {
+            stage: vk::ShaderStageFlags::VERTEX,
+            module: vertex_module,
+            p_name: "main".as_ptr() as *const ffi::c_char,
+            ..Default::default()
+        };
+        let fragment_stage_info = vk::PipelineShaderStageCreateInfo {
+            stage: vk::ShaderStageFlags::FRAGMENT,
+            module: fragment_module,
+            p_name: "main".as_ptr() as *const ffi::c_char,
+            ..Default::default()
+        };
+
+        let vertex_binding_description = vk::VertexInputBindingDescription {
+
+        };
+
         Ok(Box::new(ShaderData {
             pipeline: vk::Pipeline::null(),
         }))

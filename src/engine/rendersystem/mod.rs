@@ -1,6 +1,6 @@
 use log::{error, info};
 use nalgebra::*;
-use std::any::Any;
+use std::{any::Any, mem};
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", xbox)))]
 mod vulkan;
@@ -21,7 +21,7 @@ pub trait RenderBackend {
     fn is_loaded(&self) -> bool;
     fn is_in_frame(&self) -> bool;
 
-    fn create_shader(&self, name: &String) -> Result<Box<dyn ShaderData>, String>;
+    fn create_shader(&self, shader_path: &String, name: &String) -> Result<Box<dyn ShaderData>, String>;
 }
 
 #[derive(Clone, Debug)]
@@ -138,9 +138,10 @@ pub struct Shader {
 }
 
 impl Shader {
-    pub fn new(state: &State, name: &str) -> Result<Self, String> {
+    pub fn new(state: &super::State, name: &str) -> Result<Self, String> {
         let name = String::from(name);
-        let data = state.backend.create_shader(&name)?;
+        let shader_path = format!("{}/{name}", super::GameDirs::shaders(state));
+        let data = state.render_state().backend.create_shader(&shader_path, &name)?;
         Ok(Self {
             name,
             data
@@ -158,6 +159,15 @@ pub struct UniformData {
 pub struct RenderTexture {
     name: String,
     texture: image::RgbaImage,
+}
+
+impl RenderTexture {
+    pub fn new(_state: &State, name: &str, texture: image::RgbaImage) -> Result<Self, String> {
+        Ok(Self {
+            name: String::from(name),
+            texture
+        })
+    }
 }
 
 pub struct Material<'a> {
@@ -206,9 +216,9 @@ pub struct Model<'a> {
 }
 
 impl<'a> Model<'a> {
-    pub fn new(state: &State, name: &str, models: &Vec<tobj::Model>, material: &'a Material<'a>) -> Self {
+    pub fn new(state: &mut State, name: &str, models: &mut Vec<tobj::Model>, material: &'a Material<'a>) -> Self {
         if !state.backend.is_initialized() || state.backend.is_loaded() {
-            error!("Not creating model {name} after resources have been loaded");
+            error!("Not creating model {name} at this time");
         }
 
         info!("Creating model {name}");
@@ -217,7 +227,7 @@ impl<'a> Model<'a> {
         let mut all_vertices = Vec::new();
         let mut all_indices: Vec<u32> = Vec::new();
         for model in models {
-            let mut mesh = model.mesh;
+            let mesh = &mut model.mesh;
 
             assert!(!mesh.normals.is_empty() && !mesh.texcoords.is_empty());
 
@@ -227,7 +237,7 @@ impl<'a> Model<'a> {
             for i in 0..vertex_count {
                 let position = Vector3::new(p[i * 3 + 0], p[i * 3 + 1], p[i * 3 + 2]);
                 let texture_coordinate = Vector2::new(t[i * 2 + 0], t[i * 2 + 1]);
-                let normal = Vector3::new(n[i * 3 + 0], n[i * 3 + 1], n[i * 3 + 2]);
+                let normal = Vector3::new(0f32, 0f32, 0f32); // Vector3::new(n[i * 3 + 0], n[i * 3 + 1], n[i * 3 + 2]);
                 vertices.push(Vertex {
                     position,
                     texture_coordinate,
